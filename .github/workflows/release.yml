@@ -1342,10 +1342,9 @@ jobs:
             mv "$zip_file" "release/$zip_name"
           done
 
-          echo "Moving other artifacts..."
-          for release_file in artifact/*.{zip,tar.gz}; do
-            mv -v "$release_file" release
-          done
+          # echo "Moving other artifacts..."
+          # mv -v artifact/*.zip release
+          # mv -v artifact/*.tar.gz release
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v6
