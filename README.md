@@ -373,6 +373,43 @@ To learn more about model quantization, [read this documentation](tools/quantize
 
     </details>
 
+- <details>
+        <summary>Use MCP tools from llama-cli</summary>
+
+        `llama-cli` can start external MCP servers over stdio and expose their tools to the model.
+
+        ```bash
+        llama-cli -m model.gguf --mcp-config mcp.json
+        ```
+
+        Example config:
+
+        ```json
+        {
+            "servers": [
+                {
+                    "name": "filesystem",
+                    "command": "python",
+                    "args": ["-m", "my_mcp_server"],
+                    "env": {
+                        "MY_FLAG": "1"
+                    },
+                    "cwd": ".",
+                    "timeout_seconds": 30
+                }
+            ]
+        }
+        ```
+
+        Notes:
+
+        - Only stdio MCP servers are supported.
+        - Tool names must be unique across all configured servers.
+        - `--mcp-max-loops N` controls how many automatic tool-call rounds `llama-cli` will execute.
+        - For more details, see [tools/cli/README.md](tools/cli/README.md).
+
+        </details>
+
 
 ## [`llama-server`](tools/server)
 
