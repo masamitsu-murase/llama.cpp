@@ -1429,6 +1429,23 @@ common_params_context common_params_parser_init(common_params & params, llama_ex
         }
     ).set_examples({LLAMA_EXAMPLE_CLI}).set_env("LLAMA_ARG_SHOW_TIMINGS"));
     add_opt(common_arg(
+        {"--mcp-config"}, "FNAME",
+        "JSON file listing stdio MCP servers for llama-cli (default: disabled)",
+        [](common_params & params, const std::string & value) {
+            params.mcp_config_file = value;
+        }
+    ).set_examples({LLAMA_EXAMPLE_CLI}).set_env("LLAMA_ARG_MCP_CONFIG"));
+    add_opt(common_arg(
+        {"--mcp-max-loops"}, "N",
+        string_format("maximum automatic MCP tool-call rounds in llama-cli (default: %d)", params.mcp_max_loops),
+        [](common_params & params, int value) {
+            if (value < 1) {
+                throw std::invalid_argument("mcp-max-loops must be >= 1");
+            }
+            params.mcp_max_loops = value;
+        }
+    ).set_examples({LLAMA_EXAMPLE_CLI}).set_env("LLAMA_ARG_MCP_MAX_LOOPS"));
+    add_opt(common_arg(
         {"-f", "--file"}, "FNAME",
         "a file containing the prompt (default: none)",
         [](common_params & params, const std::string & value) {

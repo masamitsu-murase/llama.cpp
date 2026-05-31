@@ -3,6 +3,7 @@
 #include "arg.h"
 #include "console.h"
 #include "fit.h"
+#include "mcp-registry.h"
 // #include "log.h"
 
 #include "server-common.h"
@@ -14,6 +15,7 @@
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
+#include <memory>
 #include <thread>
 #include <signal.h>
 
@@ -40,6 +42,16 @@ static bool should_stop() {
     return g_is_interrupted.load();
 }
 
+static std::string next_tool_call_id() {
+    static std::atomic<int> next_id = 1;
+    return string_format("call%05d", next_id.fetch_add(1));
+}
+
+static void ensure_tool_call_ids(common_chat_msg & message) {
+    std::vector<std::string> ids_cache;
+    message.set_tool_call_ids(ids_cache, next_tool_call_id);
+}
+
 #if defined (__unix__) || (defined (__APPLE__) && defined (__MACH__)) || defined (_WIN32)
 static void signal_handler(int) {
     if (g_is_interrupted.load()) {
@@ -54,11 +66,18 @@ static void signal_handler(int) {
 #endif
 
 struct cli_context {
+    struct completion_result {
+        common_chat_msg message;
+        result_timings timings;
+        bool ok = true;
+    };
+
     server_context ctx_server;
     json messages = json::array();
     std::vector<raw_buffer> input_files;
     task_params defaults;
     bool verbose_prompt;
+    std::vector<common_chat_tool> tools;
 
     // thread for showing "loading" animation
     std::atomic<bool> loading_show;
@@ -77,7 +96,8 @@ struct cli_context {
         verbose_prompt = params.verbose_prompt;
     }
 
-    std::string generate_completion(result_timings & out_timings) {
+    completion_result generate_completion() {
+        completion_result output;
         server_response_reader rd = ctx_server.get_response_reader();
         auto chat_params = format_chat();
         {
@@ -143,11 +163,14 @@ struct cli_context {
                 } else {
                     console::error("Error: %s\n", err_data.dump().c_str());
                 }
-                return curr_content;
+                output.ok = false;
+                output.message.role = "assistant";
+                output.message.content = curr_content;
+                return output;
             }
             auto res_partial = dynamic_cast<server_task_result_cmpl_partial *>(result.get());
             if (res_partial) {
-                out_timings = std::move(res_partial->timings);
+                output.timings = std::move(res_partial->timings);
                 for (const auto & diff : res_partial->oaicompat_msg_diffs) {
                     if (!diff.content_delta.empty()) {
                         if (is_thinking) {
@@ -172,14 +195,19 @@ struct cli_context {
             }
             auto res_final = dynamic_cast<server_task_result_cmpl_final *>(result.get());
             if (res_final) {
-                out_timings = std::move(res_final->timings);
+                output.timings = std::move(res_final->timings);
+                output.message = res_final->oaicompat_msg;
                 break;
             }
             result = rd.next(should_stop);
         }
         g_is_interrupted.store(false);
+        output.message.role = "assistant";
+        if (output.message.content.empty() && output.message.tool_calls.empty()) {
+            output.message.content = curr_content;
+        }
         // server_response_reader automatically cancels pending tasks upon destruction
-        return curr_content;
+        return output;
     }
 
     // TODO: support remote files in the future (http, https, etc)
@@ -207,8 +235,8 @@ struct cli_context {
 
         common_chat_templates_inputs inputs;
         inputs.messages              = common_chat_msgs_parse_oaicompat(messages);
-        inputs.tools                 = {}; // TODO
-        inputs.tool_choice           = COMMON_CHAT_TOOL_CHOICE_NONE;
+        inputs.tools                 = tools;
+        inputs.tool_choice           = tools.empty() ? COMMON_CHAT_TOOL_CHOICE_NONE : COMMON_CHAT_TOOL_CHOICE_AUTO;
         inputs.json_schema           = ""; // TODO
         inputs.grammar               = ""; // TODO
         inputs.use_jinja             = chat_params.use_jinja;
@@ -400,6 +428,18 @@ int llama_cli(int argc, char ** argv) {
     console::spinner::stop();
     console::log("\n");
 
+    std::unique_ptr<cli_mcp_registry> mcp_registry;
+    if (!params.mcp_config_file.empty()) {
+        try {
+            mcp_registry = cli_mcp_registry::load(params.mcp_config_file);
+            ctx_cli.tools = mcp_registry->tools();
+            console::log("MCP servers: %zu | MCP tools: %zu\n", mcp_registry->server_count(), ctx_cli.tools.size());
+        } catch (const std::exception & e) {
+            console::error("Failed to initialize MCP: %s\n", e.what());
+            return 1;
+        }
+    }
+
     std::thread inference_thread([&ctx_cli]() {
         ctx_cli.ctx_server.start_loop();
     });
@@ -523,14 +563,20 @@ int llama_cli(int argc, char ** argv) {
         if (string_starts_with(buffer, "/exit")) {
             break;
         } else if (string_starts_with(buffer, "/regen")) {
-            if (ctx_cli.messages.size() >= 2) {
-                size_t last_idx = ctx_cli.messages.size() - 1;
-                ctx_cli.messages.erase(last_idx);
-                add_user_msg = false;
-            } else {
+            size_t count_removed = 0;
+            while (!ctx_cli.messages.empty()) {
+                const auto & last = ctx_cli.messages.back();
+                if (last.value("role", std::string()) == "user") {
+                    break;
+                }
+                ctx_cli.messages.erase(ctx_cli.messages.size() - 1);
+                ++count_removed;
+            }
+            if (ctx_cli.messages.empty() || ctx_cli.messages.back().value("role", std::string()) != "user" || count_removed == 0) {
                 console::error("No message to regenerate.\n");
                 continue;
             }
+            add_user_msg = false;
         } else if (string_starts_with(buffer, "/clear")) {
             ctx_cli.messages.clear();
             add_system_prompt();
@@ -621,18 +667,44 @@ int llama_cli(int argc, char ** argv) {
             });
             cur_msg.clear();
         }
-        result_timings timings;
-        std::string assistant_content = ctx_cli.generate_completion(timings);
-        ctx_cli.messages.push_back({
-            {"role",    "assistant"},
-            {"content", assistant_content}
-        });
+        cli_context::completion_result completion = ctx_cli.generate_completion();
+        ensure_tool_call_ids(completion.message);
+        ctx_cli.messages.push_back(completion.message.to_json_oaicompat());
+
+        if (completion.ok && mcp_registry && !completion.message.tool_calls.empty()) {
+            for (int loop = 0; loop < params.mcp_max_loops && !completion.message.tool_calls.empty(); ++loop) {
+                for (const auto & tool_call : completion.message.tool_calls) {
+                    console::set_display(DISPLAY_TYPE_INFO);
+                    console::log("[MCP] %s\n", tool_call.name.c_str());
+                    console::set_display(DISPLAY_TYPE_RESET);
+
+                    const auto tool_result = mcp_registry->invoke(tool_call);
+                    common_chat_msg tool_msg;
+                    tool_msg.role = "tool";
+                    tool_msg.tool_name = tool_call.name;
+                    tool_msg.tool_call_id = tool_call.id;
+                    tool_msg.content = tool_result.content;
+                    ctx_cli.messages.push_back(tool_msg.to_json_oaicompat());
+                }
+
+                completion = ctx_cli.generate_completion();
+                ensure_tool_call_ids(completion.message);
+                ctx_cli.messages.push_back(completion.message.to_json_oaicompat());
+                if (!completion.ok) {
+                    break;
+                }
+            }
+
+            if (completion.ok && !completion.message.tool_calls.empty()) {
+                console::error("MCP tool loop limit reached (%d).\n", params.mcp_max_loops);
+            }
+        }
         console::log("\n");
 
         if (params.show_timings) {
             console::set_display(DISPLAY_TYPE_INFO);
             console::log("\n");
-            console::log("[ Prompt: %.1f t/s | Generation: %.1f t/s ]\n", timings.prompt_per_second, timings.predicted_per_second);
+            console::log("[ Prompt: %.1f t/s | Generation: %.1f t/s ]\n", completion.timings.prompt_per_second, completion.timings.predicted_per_second);
             console::set_display(DISPLAY_TYPE_RESET);
         }
 

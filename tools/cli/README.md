@@ -219,3 +219,37 @@
 | `--spec-default` | enable default speculative decoding config |
 
 <!-- HELP_END -->
+
+## MCP Stdio Support
+
+`llama-cli` can load MCP tools from external servers started over stdio.
+
+- Use `--mcp-config <file>` to point at a JSON config file.
+- Only stdio MCP servers are supported.
+- Tool names must be unique across all configured servers. Startup fails on collisions.
+- `llama-cli` will automatically execute returned tool calls and continue generation until it gets a final assistant response or reaches `--mcp-max-loops`.
+
+Example config:
+
+```json
+{
+	"servers": [
+		{
+			"name": "filesystem",
+			"command": "python",
+			"args": ["-m", "my_mcp_server"],
+			"env": {
+				"MY_FLAG": "1"
+			},
+			"cwd": ".",
+			"timeout_seconds": 30
+		}
+	]
+}
+```
+
+Unsupported in this CLI integration:
+
+- HTTP, SSE, and WebSocket MCP transports
+- MCP prompts and resources
+- Automatic tool renaming for conflicts

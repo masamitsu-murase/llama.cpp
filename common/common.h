@@ -558,6 +558,8 @@ struct common_params {
     bool no_host           = false; // bypass host buffer allowing extra buffers to be used
 
     bool single_turn       = false; // single turn chat conversation
+    std::string mcp_config_file;    // JSON file listing stdio MCP servers for llama-cli
+    int32_t mcp_max_loops  = 8;     // maximum automatic tool-call rounds in llama-cli
 
     ggml_type cache_type_k = GGML_TYPE_F16; // KV cache data type for the K
     ggml_type cache_type_v = GGML_TYPE_F16; // KV cache data type for the V
