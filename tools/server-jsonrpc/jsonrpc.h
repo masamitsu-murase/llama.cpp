@@ -1,11 +1,8 @@
 #pragma once
 
-#define JSON_ASSERT GGML_ASSERT
-#include <nlohmann/json.hpp>
+#include "server-common.h"
 
 #include <string>
-
-using json = nlohmann::ordered_json;
 
 // JSON-RPC 2.0 error codes
 enum jsonrpc_error_code {

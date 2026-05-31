@@ -89,41 +89,40 @@ static void handle_chat_completions(
     server_response_reader rd = ctx_server.get_response_reader();
     auto completion_id = gen_chatcmplid();
 
+    // Get vocab through public API chain
+    const llama_vocab * vocab = llama_model_get_vocab(
+        llama_get_model(ctx_server.get_llama_context()));
+
     try {
-        std::vector<server_task> tasks;
-        const auto & prompt = data.at("prompt");
+        server_task task(SERVER_TASK_TYPE_COMPLETION);
+        task.id = rd.get_new_id();
 
-        std::vector<server_tokens> inputs =
-            tokenize_input_prompts(ctx_server.impl->vocab, ctx_server.impl->mctx, prompt, true, true);
+        // Use cli path for tokenization (server_context_impl handles it internally)
+        task.cli = true;
+        task.cli_prompt = data.at("prompt").get<std::string>();
+        task.cli_files  = files;
 
-        for (size_t i = 0; i < inputs.size(); i++) {
-            server_task task(SERVER_TASK_TYPE_COMPLETION);
-            task.id = rd.get_new_id();
-            task.tokens = std::move(inputs[i]);
-            task.params = server_task::params_from_json_cmpl(
-                ctx_server.impl->vocab,
-                params,
-                meta.slot_n_ctx,
-                meta.logit_bias_eog,
-                data);
-            task.id_slot = json_value(data, "id_slot", -1);
+        task.params = server_task::params_from_json_cmpl(
+            vocab,
+            params,
+            meta.slot_n_ctx,
+            meta.logit_bias_eog,
+            data);
+        task.id_slot = json_value(data, "id_slot", -1);
 
-            // OAI-compat
-            task.params.res_type          = TASK_RESPONSE_TYPE_OAI_CHAT;
-            task.params.oaicompat_cmpl_id = completion_id;
-            task.params.oaicompat_model   = meta.model_name;
+        // OAI-compat
+        task.params.res_type          = TASK_RESPONSE_TYPE_OAI_CHAT;
+        task.params.oaicompat_cmpl_id = completion_id;
+        task.params.oaicompat_model   = meta.model_name;
 
-            if (task.params.n_cmpl > 1) {
-                int n_children = task.params.n_cmpl - 1;
-                for (int j = 0; j < n_children; j++) {
-                    task.add_child(task.id, rd.get_new_id());
-                }
+        if (task.params.n_cmpl > 1) {
+            int n_children = task.params.n_cmpl - 1;
+            for (int j = 0; j < n_children; j++) {
+                task.add_child(task.id, rd.get_new_id());
             }
-
-            tasks.push_back(std::move(task));
         }
 
-        rd.post_tasks(std::move(tasks));
+        rd.post_task(std::move(task));
     } catch (const std::exception & e) {
         write_response(jsonrpc_error(rpc_req.id, JSONRPC_INVALID_PARAMS, e.what()));
         return;
@@ -172,7 +171,6 @@ static void handle_chat_completions(
         write_response(jsonrpc_result(rpc_req.id, result_json));
     } else {
         // Streaming: send intermediate results as notifications, final as response
-        bool first = true;
         json final_result;
 
         while (true) {
