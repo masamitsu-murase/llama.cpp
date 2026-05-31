@@ -375,7 +375,7 @@ std::vector<common_chat_tool> cli_mcp_client::list_tools() {
 
             common_chat_tool tool;
             tool.name = item.at("name").get<std::string>();
-            tool.description = json_value(item, "description", std::string());
+            tool.description = item.value("description", std::string());
             if (item.contains("inputSchema")) {
                 tool.parameters = item.at("inputSchema").dump();
             } else {

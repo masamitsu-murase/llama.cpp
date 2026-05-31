@@ -93,7 +93,7 @@ cli_mcp_tool_result cli_mcp_registry::invoke(const common_chat_tool_call & tool_
             {"tool", tool_call.name},
             {"result", result},
         };
-        bool is_error = json_value(result, "isError", false);
+        bool is_error = result.value("isError", false);
         return { wrapped.dump(), is_error };
     } catch (const std::exception & e) {
         return {

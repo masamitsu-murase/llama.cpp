@@ -87,8 +87,8 @@ cli_mcp_config cli_mcp_config_load_from_file(const std::string & path) {
         server.command = jserver.at("command").get<std::string>();
         server.args = parse_args(jserver, server.name);
         server.env = parse_env(jserver, server.name);
-        server.cwd = json_value(jserver, "cwd", std::string());
-        server.timeout_seconds = json_value(jserver, "timeout_seconds", 30);
+        server.cwd = jserver.value("cwd", std::string());
+        server.timeout_seconds = jserver.value("timeout_seconds", 30);
 
         if (server.name.empty()) {
             throw std::runtime_error("MCP server 'name' must not be empty");
