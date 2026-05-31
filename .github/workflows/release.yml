@@ -1346,10 +1346,16 @@ jobs:
           # mv -v artifact/*.zip release
           # mv -v artifact/*.tar.gz release
 
+      - name: Prepare upload artifact
+        run: |
+          upload_dir="artifact-upload/llama-${{ steps.tag.outputs.name }}-bin-win-vulkan-x64"
+          mkdir -p "$upload_dir"
+          unzip -q "release/llama-${{ steps.tag.outputs.name }}-bin-win-vulkan-x64.zip" -d "$upload_dir"
+
       - name: Upload artifacts
         uses: actions/upload-artifact@v6
         with:
-          path: release/llama-${{ steps.tag.outputs.name }}-bin-win-vulkan-x64.zip
+          path: artifact-upload/llama-${{ steps.tag.outputs.name }}-bin-win-vulkan-x64
           name: llama-${{ steps.tag.outputs.name }}-bin-win-vulkan-x64.zip
 
       # - name: Download UI build
