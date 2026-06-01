@@ -3,6 +3,8 @@
 #include "arg.h"
 #include "console.h"
 #include "fit.h"
+#include "mcp-config.h"
+#include "mcp-registry.h"
 // #include "log.h"
 
 #include "server-common.h"
@@ -54,11 +56,22 @@ static void signal_handler(int) {
 #endif
 
 struct cli_context {
+    struct generation_result {
+        result_timings timings;
+        common_chat_msg assistant_msg;
+        bool ok = true;
+    };
+
     server_context ctx_server;
     json messages = json::array();
     std::vector<raw_buffer> input_files;
     task_params defaults;
     bool verbose_prompt;
+    bool verbose_mcp;
+
+    int mcp_tool_loop_max;
+    int mcp_tool_timeout;
+    std::unique_ptr<cli_mcp_registry> mcp_registry;
 
     // thread for showing "loading" animation
     std::atomic<bool> loading_show;
@@ -75,9 +88,49 @@ struct cli_context {
         // defaults.return_progress = true; // TODO: show progress
 
         verbose_prompt = params.verbose_prompt;
+        verbose_mcp = params.verbosity >= LOG_LEVEL_INFO;
+
+        mcp_tool_loop_max = params.mcp_tool_loop_max;
+        mcp_tool_timeout = params.mcp_tool_timeout;
     }
 
-    std::string generate_completion(result_timings & out_timings) {
+    bool init_mcp(const common_params & params, std::string & err) {
+        if (params.mcp_config.empty()) {
+            return true;
+        }
+
+        cli_mcp_config config;
+        if (!cli_mcp_config_load_file(params.mcp_config, config, err)) {
+            return false;
+        }
+
+        auto reg = std::make_unique<cli_mcp_registry>();
+        if (!reg->initialize(config, mcp_tool_timeout, err)) {
+            return false;
+        }
+
+        if (verbose_mcp) {
+            console::log("[mcp] loaded %zu server(s), %zu tool(s)\n", config.servers.size(), reg->chat_tools().size());
+        }
+
+        mcp_registry = std::move(reg);
+        return true;
+    }
+
+    bool has_mcp_tools() const {
+        return mcp_registry && !mcp_registry->empty();
+    }
+
+    bool invoke_mcp_tool(const common_chat_tool_call & tool_call, cli_mcp_tool_exec_result & out, std::string & err) {
+        if (!mcp_registry) {
+            err = "MCP registry is not initialized";
+            return false;
+        }
+        return mcp_registry->invoke_tool(tool_call, mcp_tool_timeout, out, err);
+    }
+
+    generation_result generate_completion() {
+        generation_result out;
         server_response_reader rd = ctx_server.get_response_reader();
         auto chat_params = format_chat();
         {
@@ -143,11 +196,13 @@ struct cli_context {
                 } else {
                     console::error("Error: %s\n", err_data.dump().c_str());
                 }
-                return curr_content;
+                out.ok = false;
+                out.assistant_msg.role = "assistant";
+                out.assistant_msg.content = curr_content;
+                return out;
             }
             auto res_partial = dynamic_cast<server_task_result_cmpl_partial *>(result.get());
             if (res_partial) {
-                out_timings = std::move(res_partial->timings);
                 for (const auto & diff : res_partial->oaicompat_msg_diffs) {
                     if (!diff.content_delta.empty()) {
                         if (is_thinking) {
@@ -169,17 +224,25 @@ struct cli_context {
                         console::flush();
                     }
                 }
+                out.timings = std::move(res_partial->timings);
             }
             auto res_final = dynamic_cast<server_task_result_cmpl_final *>(result.get());
             if (res_final) {
-                out_timings = std::move(res_final->timings);
+                out.timings = std::move(res_final->timings);
+                out.assistant_msg = res_final->oaicompat_msg;
                 break;
             }
             result = rd.next(should_stop);
         }
+
+        if (out.assistant_msg.empty()) {
+            out.assistant_msg.role = "assistant";
+            out.assistant_msg.content = curr_content;
+        }
+
         g_is_interrupted.store(false);
         // server_response_reader automatically cancels pending tasks upon destruction
-        return curr_content;
+        return out;
     }
 
     // TODO: support remote files in the future (http, https, etc)
@@ -207,8 +270,8 @@ struct cli_context {
 
         common_chat_templates_inputs inputs;
         inputs.messages              = common_chat_msgs_parse_oaicompat(messages);
-        inputs.tools                 = {}; // TODO
-        inputs.tool_choice           = COMMON_CHAT_TOOL_CHOICE_NONE;
+        inputs.tools                 = has_mcp_tools() ? mcp_registry->chat_tools() : std::vector<common_chat_tool>();
+        inputs.tool_choice           = has_mcp_tools() ? COMMON_CHAT_TOOL_CHOICE_AUTO : COMMON_CHAT_TOOL_CHOICE_NONE;
         inputs.json_schema           = ""; // TODO
         inputs.grammar               = ""; // TODO
         inputs.use_jinja             = chat_params.use_jinja;
@@ -364,6 +427,14 @@ int llama_cli(int argc, char ** argv) {
 
     // struct that contains llama context and inference
     cli_context ctx_cli(params);
+
+    {
+        std::string mcp_err;
+        if (!ctx_cli.init_mcp(params, mcp_err)) {
+            fprintf(stderr, "Failed to initialize MCP: %s\n", mcp_err.c_str());
+            return 1;
+        }
+    }
 
     llama_backend_init();
     llama_numa_init(params.numa);
@@ -622,11 +693,55 @@ int llama_cli(int argc, char ** argv) {
             cur_msg.clear();
         }
         result_timings timings;
-        std::string assistant_content = ctx_cli.generate_completion(timings);
-        ctx_cli.messages.push_back({
-            {"role",    "assistant"},
-            {"content", assistant_content}
-        });
+        bool model_turn_completed = false;
+        int tool_loops = 0;
+
+        while (!model_turn_completed) {
+            auto generation = ctx_cli.generate_completion();
+            timings = generation.timings;
+
+            ctx_cli.messages.push_back(generation.assistant_msg.to_json_oaicompat());
+
+            if (!generation.ok) {
+                model_turn_completed = true;
+                break;
+            }
+
+            if (!ctx_cli.has_mcp_tools() || generation.assistant_msg.tool_calls.empty()) {
+                model_turn_completed = true;
+                break;
+            }
+
+            tool_loops++;
+            if (tool_loops > ctx_cli.mcp_tool_loop_max) {
+                console::error("Reached MCP tool loop limit (%d).\n", ctx_cli.mcp_tool_loop_max);
+                model_turn_completed = true;
+                break;
+            }
+
+            for (const auto & tool_call : generation.assistant_msg.tool_calls) {
+                if (ctx_cli.verbose_mcp) {
+                    console::set_display(DISPLAY_TYPE_INFO);
+                    console::log("[mcp] calling tool '%s'\n", tool_call.name.c_str());
+                    console::set_display(DISPLAY_TYPE_RESET);
+                }
+
+                cli_mcp_tool_exec_result tool_result;
+                std::string tool_err;
+                if (!ctx_cli.invoke_mcp_tool(tool_call, tool_result, tool_err)) {
+                    tool_result.is_error = true;
+                    tool_result.content = string_format("error: failed to invoke tool '%s': %s", tool_call.name.c_str(), tool_err.c_str());
+                }
+
+                ctx_cli.messages.push_back({
+                    {"role", "tool"},
+                    {"content", tool_result.content},
+                    {"name", tool_call.name},
+                    {"tool_call_id", tool_call.id}
+                });
+            }
+        }
+
         console::log("\n");
 
         if (params.show_timings) {

@@ -219,3 +219,40 @@
 | `--spec-default` | enable default speculative decoding config |
 
 <!-- HELP_END -->
+
+## MCP stdio (llama-cli)
+
+`llama-cli` can load MCP tools from external stdio servers.
+
+- Supported transport: stdio only.
+- Scope: tools only (`tools/list`, `tools/call`).
+- If two servers expose the same tool name, startup fails.
+
+### Example config
+
+```json
+{
+	"servers": [
+		{
+			"name": "local-fs",
+			"command": "npx",
+			"args": ["-y", "@modelcontextprotocol/server-filesystem", "."],
+			"env": {
+				"MCP_LOG_LEVEL": "info"
+			},
+			"timeout_seconds": 30
+		}
+	]
+}
+```
+
+### Run
+
+```bash
+llama-cli --model path/to/model.gguf --mcp-config mcp-config.json
+```
+
+Useful limits:
+
+- `--mcp-tool-loop-max N`: max automatic tool-call iterations (default `16`).
+- `--mcp-tool-timeout N`: timeout per MCP `tools/call` in seconds (default `30`).

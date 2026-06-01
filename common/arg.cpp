@@ -1550,6 +1550,33 @@ common_params_context common_params_parser_init(common_params & params, llama_ex
         }
     ).set_examples({LLAMA_EXAMPLE_COMPLETION, LLAMA_EXAMPLE_CLI}));
     add_opt(common_arg(
+        {"--mcp-config"}, "FNAME",
+        "path to llama-cli MCP config JSON file (stdio transport only; default: disabled)",
+        [](common_params & params, const std::string & value) {
+            params.mcp_config = value;
+        }
+    ).set_examples({LLAMA_EXAMPLE_CLI}).set_env("LLAMA_ARG_MCP_CONFIG"));
+    add_opt(common_arg(
+        {"--mcp-tool-loop-max"}, "N",
+        string_format("maximum number of automatic MCP tool loop iterations (default: %d)", params.mcp_tool_loop_max),
+        [](common_params & params, int value) {
+            if (value < 1) {
+                throw std::invalid_argument("must be >= 1");
+            }
+            params.mcp_tool_loop_max = value;
+        }
+    ).set_examples({LLAMA_EXAMPLE_CLI}).set_env("LLAMA_ARG_MCP_TOOL_LOOP_MAX"));
+    add_opt(common_arg(
+        {"--mcp-tool-timeout"}, "N",
+        string_format("MCP tool-call timeout in seconds (default: %d)", params.mcp_tool_timeout),
+        [](common_params & params, int value) {
+            if (value < 1) {
+                throw std::invalid_argument("must be >= 1");
+            }
+            params.mcp_tool_timeout = value;
+        }
+    ).set_examples({LLAMA_EXAMPLE_CLI}).set_env("LLAMA_ARG_MCP_TOOL_TIMEOUT"));
+    add_opt(common_arg(
         {"-i", "--interactive"},
         string_format("run in interactive mode (default: %s)", params.interactive ? "true" : "false"),
         [](common_params & params) {
