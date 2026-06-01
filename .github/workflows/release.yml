@@ -9,7 +9,7 @@ on:
         type: boolean
   push:
     branches:
-      - master
+      - '*'
     paths: [
       '.github/workflows/release.yml',
       '**/CMakeLists.txt',
@@ -38,6 +38,8 @@ env:
 jobs:
 
   macOS-cpu:
+
+    if: false
 
     strategy:
       matrix:
@@ -109,6 +111,8 @@ jobs:
           name: llama-bin-macos-${{ matrix.build }}.tar.gz
 
   ubuntu-cpu:
+
+    if: false
 
     strategy:
       matrix:
@@ -187,6 +191,8 @@ jobs:
 
   ubuntu-vulkan:
 
+    if: false
+
     strategy:
       matrix:
         include:
@@ -262,6 +268,8 @@ jobs:
           name: llama-bin-ubuntu-vulkan-${{ matrix.build }}.tar.gz
 
   android-arm64:
+
+    if: false
 
     runs-on: ubuntu-latest
 
@@ -339,6 +347,8 @@ jobs:
           name: llama-bin-android-arm64.tar.gz
 
   ubuntu-24-openvino:
+
+    if: false
 
     runs-on: ubuntu-24.04
 
@@ -501,10 +511,10 @@ jobs:
             arch: 'x64'
             defines: '-DGGML_VULKAN=ON'
             target: 'ggml-vulkan'
-          - backend: 'opencl-adreno'
-            arch: 'arm64'
-            defines: '-G "Ninja Multi-Config" -D CMAKE_TOOLCHAIN_FILE=cmake/arm64-windows-llvm.cmake -DCMAKE_PREFIX_PATH="$env:RUNNER_TEMP/opencl-arm64-release" -DGGML_OPENCL=ON -DGGML_OPENCL_USE_ADRENO_KERNELS=ON'
-            target: 'ggml-opencl'
+          # - backend: 'opencl-adreno'
+          #   arch: 'arm64'
+          #   defines: '-G "Ninja Multi-Config" -D CMAKE_TOOLCHAIN_FILE=cmake/arm64-windows-llvm.cmake -DCMAKE_PREFIX_PATH="$env:RUNNER_TEMP/opencl-arm64-release" -DGGML_OPENCL=ON -DGGML_OPENCL_USE_ADRENO_KERNELS=ON'
+          #   target: 'ggml-opencl'
 
     steps:
       - name: Clone
@@ -577,6 +587,8 @@ jobs:
           name: llama-bin-win-${{ matrix.backend }}-${{ matrix.arch }}.zip
 
   windows-cuda:
+
+    if: false
 
     runs-on: windows-2022
 
@@ -656,6 +668,8 @@ jobs:
           name: cudart-llama-bin-win-cuda-${{ matrix.cuda }}-x64.zip
 
   windows-sycl:
+
+    if: false
 
     runs-on: windows-2022
 
@@ -770,6 +784,8 @@ jobs:
 
   ubuntu-24-sycl:
 
+    if: false
+
     strategy:
       matrix:
         build: [fp32, fp16]
@@ -863,6 +879,8 @@ jobs:
           name: llama-bin-ubuntu-sycl-${{ matrix.build }}-x64.tar.gz
 
   ubuntu-22-rocm:
+
+    if: false
 
     runs-on: ubuntu-22.04
 
@@ -974,6 +992,8 @@ jobs:
           name: llama-bin-ubuntu-rocm-${{ env.ROCM_VERSION_SHORT }}-${{ matrix.build }}.tar.gz
 
   windows-hip:
+
+    if: false
 
     runs-on: windows-2022
 
@@ -1088,6 +1108,8 @@ jobs:
           name: llama-bin-win-hip-${{ matrix.name }}-x64.zip
 
   ios-xcode-build:
+    if: false
+
     runs-on: macos-15
 
     steps:
@@ -1145,6 +1167,8 @@ jobs:
 
 
   openEuler-cann:
+    if: false
+
     strategy:
       matrix:
         include:
@@ -1238,7 +1262,6 @@ jobs:
     uses: ./.github/workflows/ui-build.yml
 
   release:
-    if: ${{ ( github.event_name == 'push' && github.ref == 'refs/heads/master' ) || github.event.inputs.create_release == 'true' }}
 
     # Fine-grant permission
     # https://docs.github.com/en/actions/security-for-github-actions/security-guides/automatic-token-authentication#modifying-the-permissions-for-the-github_token
@@ -1250,18 +1273,18 @@ jobs:
     needs:
       - windows
       - windows-cpu
-      - windows-cuda
-      - windows-sycl
-      - windows-hip
-      - ubuntu-22-rocm
-      - ubuntu-cpu
-      - ubuntu-vulkan
-      - ubuntu-24-openvino
-      - ubuntu-24-sycl
-      - android-arm64
-      - macOS-cpu
-      - ios-xcode-build
-      - openEuler-cann
+      # - windows-cuda
+      # - windows-sycl
+      # - windows-hip
+      # - ubuntu-22-rocm
+      # - ubuntu-cpu
+      # - ubuntu-vulkan
+      # - ubuntu-24-openvino
+      # - ubuntu-24-sycl
+      # - android-arm64
+      # - macOS-cpu
+      # - ios-xcode-build
+      # - openEuler-cann
       - ui-build
 
     outputs:
@@ -1287,11 +1310,12 @@ jobs:
 
       - name: Move artifacts
         id: move_artifacts
+        # for arch in x64 arm64; do  =>  for arch in x64; do
         run: |
           mkdir -p release
 
           echo "Adding CPU backend files to existing zips..."
-          for arch in x64 arm64; do
+          for arch in x64; do
             cpu_zip="artifact/llama-bin-win-cpu-${arch}.zip"
             temp_dir=$(mktemp -d)
             echo "Extracting CPU backend for $arch..."
@@ -1318,98 +1342,110 @@ jobs:
             mv "$zip_file" "release/$zip_name"
           done
 
-          echo "Moving other artifacts..."
-          mv -v artifact/*.zip release
-          mv -v artifact/*.tar.gz release
+          # echo "Moving other artifacts..."
+          # mv -v artifact/*.zip release
+          # mv -v artifact/*.tar.gz release
 
-      - name: Download UI build
-        id: download_ui
-        uses: actions/download-artifact@v7
-        with:
-          name: ui-build
-          path: ./ui-dist
-
-      - name: Package UI
-        id: package_ui
+      - name: Prepare upload artifact
         run: |
-          tar -czvf release/llama-${{ steps.tag.outputs.name }}-ui.tar.gz --transform "s,^\.,llama-${{ steps.tag.outputs.name }}," -C ./ui-dist .
+          upload_dir="artifact-upload/llama-${{ steps.tag.outputs.name }}-bin-win-vulkan-x64"
+          mkdir -p "$upload_dir"
+          unzip -q "release/llama-${{ steps.tag.outputs.name }}-bin-win-vulkan-x64.zip" -d "$upload_dir"
 
-      - name: Create release
-        id: create_release
-        uses: ggml-org/action-create-release@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v6
         with:
-          tag_name: ${{ steps.tag.outputs.name }}
-          body: |
-            <details open>
+          path: artifact-upload/llama-${{ steps.tag.outputs.name }}-bin-win-vulkan-x64
+          name: llama-${{ steps.tag.outputs.name }}-bin-win-vulkan-x64.zip
 
-            ${{ github.event.head_commit.message }}
+      # - name: Download UI build
+      #   id: download_ui
+      #   uses: actions/download-artifact@v7
+      #   with:
+      #     name: ui-build
+      #     path: ./ui-dist
 
-            </details>
+      # - name: Package UI
+      #   id: package_ui
+      #   run: |
+      #     tar -czvf release/llama-${{ steps.tag.outputs.name }}-ui.tar.gz --transform "s,^\.,llama-${{ steps.tag.outputs.name }}," -C ./ui-dist .
 
-            **macOS/iOS:**
-            - [macOS Apple Silicon (arm64)](https://github.com/ggml-org/llama.cpp/releases/download/${{ steps.tag.outputs.name }}/llama-${{ steps.tag.outputs.name }}-bin-macos-arm64.tar.gz)
-            - [macOS Apple Silicon (arm64, KleidiAI enabled)](https://github.com/ggml-org/llama.cpp/releases/download/${{ steps.tag.outputs.name }}/llama-${{ steps.tag.outputs.name }}-bin-macos-arm64-kleidiai.tar.gz)
-            - [macOS Intel (x64)](https://github.com/ggml-org/llama.cpp/releases/download/${{ steps.tag.outputs.name }}/llama-${{ steps.tag.outputs.name }}-bin-macos-x64.tar.gz)
-            - [iOS XCFramework](https://github.com/ggml-org/llama.cpp/releases/download/${{ steps.tag.outputs.name }}/llama-${{ steps.tag.outputs.name }}-xcframework.zip)
+      # - name: Create release
+      #   id: create_release
+      #   uses: ggml-org/action-create-release@v1
+      #   env:
+      #     GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      #   with:
+      #     tag_name: ${{ steps.tag.outputs.name }}
+      #     body: |
+      #       <details open>
 
-            **Linux:**
-            - [Ubuntu x64 (CPU)](https://github.com/ggml-org/llama.cpp/releases/download/${{ steps.tag.outputs.name }}/llama-${{ steps.tag.outputs.name }}-bin-ubuntu-x64.tar.gz)
-            - [Ubuntu arm64 (CPU)](https://github.com/ggml-org/llama.cpp/releases/download/${{ steps.tag.outputs.name }}/llama-${{ steps.tag.outputs.name }}-bin-ubuntu-arm64.tar.gz)
-            - [Ubuntu s390x (CPU)](https://github.com/ggml-org/llama.cpp/releases/download/${{ steps.tag.outputs.name }}/llama-${{ steps.tag.outputs.name }}-bin-ubuntu-s390x.tar.gz)
-            - [Ubuntu x64 (Vulkan)](https://github.com/ggml-org/llama.cpp/releases/download/${{ steps.tag.outputs.name }}/llama-${{ steps.tag.outputs.name }}-bin-ubuntu-vulkan-x64.tar.gz)
-            - [Ubuntu arm64 (Vulkan)](https://github.com/ggml-org/llama.cpp/releases/download/${{ steps.tag.outputs.name }}/llama-${{ steps.tag.outputs.name }}-bin-ubuntu-vulkan-arm64.tar.gz)
-            - [Ubuntu x64 (ROCm 7.2)](https://github.com/ggml-org/llama.cpp/releases/download/${{ steps.tag.outputs.name }}/llama-${{ steps.tag.outputs.name }}-bin-ubuntu-rocm-7.2-x64.tar.gz)
-            - [Ubuntu x64 (OpenVINO)](https://github.com/ggml-org/llama.cpp/releases/download/${{ steps.tag.outputs.name }}/llama-${{ steps.tag.outputs.name }}-bin-ubuntu-openvino-${{ needs.ubuntu-24-openvino.outputs.openvino_version }}-x64.tar.gz)
-            - [Ubuntu x64 (SYCL FP32)](https://github.com/ggml-org/llama.cpp/releases/download/${{ steps.tag.outputs.name }}/llama-${{ steps.tag.outputs.name }}-bin-ubuntu-sycl-fp32-x64.tar.gz)
-            - [Ubuntu x64 (SYCL FP16)](https://github.com/ggml-org/llama.cpp/releases/download/${{ steps.tag.outputs.name }}/llama-${{ steps.tag.outputs.name }}-bin-ubuntu-sycl-fp16-x64.tar.gz)
+      #       ${{ github.event.head_commit.message }}
 
-            **Android:**
-            - [Android arm64 (CPU)](https://github.com/ggml-org/llama.cpp/releases/download/${{ steps.tag.outputs.name }}/llama-${{ steps.tag.outputs.name }}-bin-android-arm64.tar.gz)
+      #       </details>
 
-            **Windows:**
-            - [Windows x64 (CPU)](https://github.com/ggml-org/llama.cpp/releases/download/${{ steps.tag.outputs.name }}/llama-${{ steps.tag.outputs.name }}-bin-win-cpu-x64.zip)
-            - [Windows arm64 (CPU)](https://github.com/ggml-org/llama.cpp/releases/download/${{ steps.tag.outputs.name }}/llama-${{ steps.tag.outputs.name }}-bin-win-cpu-arm64.zip)
-            - [Windows x64 (CUDA 12)](https://github.com/ggml-org/llama.cpp/releases/download/${{ steps.tag.outputs.name }}/llama-${{ steps.tag.outputs.name }}-bin-win-cuda-12.4-x64.zip) - [CUDA 12.4 DLLs](https://github.com/ggml-org/llama.cpp/releases/download/${{ steps.tag.outputs.name }}/cudart-llama-bin-win-cuda-12.4-x64.zip)
-            - [Windows x64 (CUDA 13)](https://github.com/ggml-org/llama.cpp/releases/download/${{ steps.tag.outputs.name }}/llama-${{ steps.tag.outputs.name }}-bin-win-cuda-13.1-x64.zip) - [CUDA 13.1 DLLs](https://github.com/ggml-org/llama.cpp/releases/download/${{ steps.tag.outputs.name }}/cudart-llama-bin-win-cuda-13.1-x64.zip)
-            - [Windows x64 (Vulkan)](https://github.com/ggml-org/llama.cpp/releases/download/${{ steps.tag.outputs.name }}/llama-${{ steps.tag.outputs.name }}-bin-win-vulkan-x64.zip)
-            - [Windows x64 (SYCL)](https://github.com/ggml-org/llama.cpp/releases/download/${{ steps.tag.outputs.name }}/llama-${{ steps.tag.outputs.name }}-bin-win-sycl-x64.zip)
-            - [Windows x64 (HIP)](https://github.com/ggml-org/llama.cpp/releases/download/${{ steps.tag.outputs.name }}/llama-${{ steps.tag.outputs.name }}-bin-win-hip-radeon-x64.zip)
+      #       **macOS/iOS:**
+      #       - [macOS Apple Silicon (arm64)](https://github.com/ggml-org/llama.cpp/releases/download/${{ steps.tag.outputs.name }}/llama-${{ steps.tag.outputs.name }}-bin-macos-arm64.tar.gz)
+      #       - [macOS Apple Silicon (arm64, KleidiAI enabled)](https://github.com/ggml-org/llama.cpp/releases/download/${{ steps.tag.outputs.name }}/llama-${{ steps.tag.outputs.name }}-bin-macos-arm64-kleidiai.tar.gz)
+      #       - [macOS Intel (x64)](https://github.com/ggml-org/llama.cpp/releases/download/${{ steps.tag.outputs.name }}/llama-${{ steps.tag.outputs.name }}-bin-macos-x64.tar.gz)
+      #       - [iOS XCFramework](https://github.com/ggml-org/llama.cpp/releases/download/${{ steps.tag.outputs.name }}/llama-${{ steps.tag.outputs.name }}-xcframework.zip)
 
-            **openEuler:**
-            - [openEuler x86 (310p)](https://github.com/ggml-org/llama.cpp/releases/download/${{ steps.tag.outputs.name }}/llama-${{ steps.tag.outputs.name }}-bin-310p-openEuler-x86.tar.gz)
-            - [openEuler x86 (910b, ACL Graph)](https://github.com/ggml-org/llama.cpp/releases/download/${{ steps.tag.outputs.name }}/llama-${{ steps.tag.outputs.name }}-bin-910b-openEuler-x86-aclgraph.tar.gz)
-            - [openEuler aarch64 (310p)](https://github.com/ggml-org/llama.cpp/releases/download/${{ steps.tag.outputs.name }}/llama-${{ steps.tag.outputs.name }}-bin-310p-openEuler-aarch64.tar.gz)
-            - [openEuler aarch64 (910b, ACL Graph)](https://github.com/ggml-org/llama.cpp/releases/download/${{ steps.tag.outputs.name }}/llama-${{ steps.tag.outputs.name }}-bin-910b-openEuler-aarch64-aclgraph.tar.gz)
+      #       **Linux:**
+      #       - [Ubuntu x64 (CPU)](https://github.com/ggml-org/llama.cpp/releases/download/${{ steps.tag.outputs.name }}/llama-${{ steps.tag.outputs.name }}-bin-ubuntu-x64.tar.gz)
+      #       - [Ubuntu arm64 (CPU)](https://github.com/ggml-org/llama.cpp/releases/download/${{ steps.tag.outputs.name }}/llama-${{ steps.tag.outputs.name }}-bin-ubuntu-arm64.tar.gz)
+      #       - [Ubuntu s390x (CPU)](https://github.com/ggml-org/llama.cpp/releases/download/${{ steps.tag.outputs.name }}/llama-${{ steps.tag.outputs.name }}-bin-ubuntu-s390x.tar.gz)
+      #       - [Ubuntu x64 (Vulkan)](https://github.com/ggml-org/llama.cpp/releases/download/${{ steps.tag.outputs.name }}/llama-${{ steps.tag.outputs.name }}-bin-ubuntu-vulkan-x64.tar.gz)
+      #       - [Ubuntu arm64 (Vulkan)](https://github.com/ggml-org/llama.cpp/releases/download/${{ steps.tag.outputs.name }}/llama-${{ steps.tag.outputs.name }}-bin-ubuntu-vulkan-arm64.tar.gz)
+      #       - [Ubuntu x64 (ROCm 7.2)](https://github.com/ggml-org/llama.cpp/releases/download/${{ steps.tag.outputs.name }}/llama-${{ steps.tag.outputs.name }}-bin-ubuntu-rocm-7.2-x64.tar.gz)
+      #       - [Ubuntu x64 (OpenVINO)](https://github.com/ggml-org/llama.cpp/releases/download/${{ steps.tag.outputs.name }}/llama-${{ steps.tag.outputs.name }}-bin-ubuntu-openvino-${{ needs.ubuntu-24-openvino.outputs.openvino_version }}-x64.tar.gz)
+      #       - [Ubuntu x64 (SYCL FP32)](https://github.com/ggml-org/llama.cpp/releases/download/${{ steps.tag.outputs.name }}/llama-${{ steps.tag.outputs.name }}-bin-ubuntu-sycl-fp32-x64.tar.gz)
+      #       - [Ubuntu x64 (SYCL FP16)](https://github.com/ggml-org/llama.cpp/releases/download/${{ steps.tag.outputs.name }}/llama-${{ steps.tag.outputs.name }}-bin-ubuntu-sycl-fp16-x64.tar.gz)
 
-            **UI:**
-            - [UI](https://github.com/ggml-org/llama.cpp/releases/download/${{ steps.tag.outputs.name }}/llama-${{ steps.tag.outputs.name }}-ui.tar.gz)
+      #       **Android:**
+      #       - [Android arm64 (CPU)](https://github.com/ggml-org/llama.cpp/releases/download/${{ steps.tag.outputs.name }}/llama-${{ steps.tag.outputs.name }}-bin-android-arm64.tar.gz)
 
-      - name: Upload release
-        id: upload_release
-        uses: actions/github-script@v8
-        with:
-          github-token: ${{secrets.GITHUB_TOKEN}}
-          script: |
-            const path = require('path');
-            const fs = require('fs');
-            const release_id = '${{ steps.create_release.outputs.id }}';
-            for (let file of await fs.readdirSync('./release')) {
-              if (path.extname(file) === '.zip' || file.endsWith('.tar.gz')) {
-                console.log('uploadReleaseAsset', file);
-                await github.rest.repos.uploadReleaseAsset({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  release_id: release_id,
-                  name: file,
-                  data: await fs.readFileSync(`./release/${file}`)
-                });
-              }
-            }
+      #       **Windows:**
+      #       - [Windows x64 (CPU)](https://github.com/ggml-org/llama.cpp/releases/download/${{ steps.tag.outputs.name }}/llama-${{ steps.tag.outputs.name }}-bin-win-cpu-x64.zip)
+      #       - [Windows arm64 (CPU)](https://github.com/ggml-org/llama.cpp/releases/download/${{ steps.tag.outputs.name }}/llama-${{ steps.tag.outputs.name }}-bin-win-cpu-arm64.zip)
+      #       - [Windows x64 (CUDA 12)](https://github.com/ggml-org/llama.cpp/releases/download/${{ steps.tag.outputs.name }}/llama-${{ steps.tag.outputs.name }}-bin-win-cuda-12.4-x64.zip) - [CUDA 12.4 DLLs](https://github.com/ggml-org/llama.cpp/releases/download/${{ steps.tag.outputs.name }}/cudart-llama-bin-win-cuda-12.4-x64.zip)
+      #       - [Windows x64 (CUDA 13)](https://github.com/ggml-org/llama.cpp/releases/download/${{ steps.tag.outputs.name }}/llama-${{ steps.tag.outputs.name }}-bin-win-cuda-13.1-x64.zip) - [CUDA 13.1 DLLs](https://github.com/ggml-org/llama.cpp/releases/download/${{ steps.tag.outputs.name }}/cudart-llama-bin-win-cuda-13.1-x64.zip)
+      #       - [Windows x64 (Vulkan)](https://github.com/ggml-org/llama.cpp/releases/download/${{ steps.tag.outputs.name }}/llama-${{ steps.tag.outputs.name }}-bin-win-vulkan-x64.zip)
+      #       - [Windows x64 (SYCL)](https://github.com/ggml-org/llama.cpp/releases/download/${{ steps.tag.outputs.name }}/llama-${{ steps.tag.outputs.name }}-bin-win-sycl-x64.zip)
+      #       - [Windows x64 (HIP)](https://github.com/ggml-org/llama.cpp/releases/download/${{ steps.tag.outputs.name }}/llama-${{ steps.tag.outputs.name }}-bin-win-hip-radeon-x64.zip)
+
+      #       **openEuler:**
+      #       - [openEuler x86 (310p)](https://github.com/ggml-org/llama.cpp/releases/download/${{ steps.tag.outputs.name }}/llama-${{ steps.tag.outputs.name }}-bin-310p-openEuler-x86.tar.gz)
+      #       - [openEuler x86 (910b, ACL Graph)](https://github.com/ggml-org/llama.cpp/releases/download/${{ steps.tag.outputs.name }}/llama-${{ steps.tag.outputs.name }}-bin-910b-openEuler-x86-aclgraph.tar.gz)
+      #       - [openEuler aarch64 (310p)](https://github.com/ggml-org/llama.cpp/releases/download/${{ steps.tag.outputs.name }}/llama-${{ steps.tag.outputs.name }}-bin-310p-openEuler-aarch64.tar.gz)
+      #       - [openEuler aarch64 (910b, ACL Graph)](https://github.com/ggml-org/llama.cpp/releases/download/${{ steps.tag.outputs.name }}/llama-${{ steps.tag.outputs.name }}-bin-910b-openEuler-aarch64-aclgraph.tar.gz)
+
+      #       **UI:**
+      #       - [UI](https://github.com/ggml-org/llama.cpp/releases/download/${{ steps.tag.outputs.name }}/llama-${{ steps.tag.outputs.name }}-ui.tar.gz)
+
+      # - name: Upload release
+      #   id: upload_release
+      #   uses: actions/github-script@v8
+      #   with:
+      #     github-token: ${{secrets.GITHUB_TOKEN}}
+      #     script: |
+      #       const path = require('path');
+      #       const fs = require('fs');
+      #       const release_id = '${{ steps.create_release.outputs.id }}';
+      #       for (let file of await fs.readdirSync('./release')) {
+      #         if (path.extname(file) === '.zip' || file.endsWith('.tar.gz')) {
+      #           console.log('uploadReleaseAsset', file);
+      #           await github.rest.repos.uploadReleaseAsset({
+      #             owner: context.repo.owner,
+      #             repo: context.repo.repo,
+      #             release_id: release_id,
+      #             name: file,
+      #             data: await fs.readFileSync(`./release/${file}`)
+      #           });
+      #         }
+      #       }
 
   ui-publish:
-    if: ${{ ( github.event_name == 'push' && github.ref == 'refs/heads/master' ) || github.event.inputs.create_release == 'true' }}
+    if: false
 
     needs:
       - release
