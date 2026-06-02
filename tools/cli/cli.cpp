@@ -431,7 +431,7 @@ int llama_cli(int argc, char ** argv) {
     {
         std::string mcp_err;
         if (!ctx_cli.init_mcp(params, mcp_err)) {
-            fprintf(stderr, "Failed to initialize MCP: %s\n", mcp_err.c_str());
+            console::error("Failed to initialize MCP: %s\n", mcp_err.c_str());
             return 1;
         }
     }
