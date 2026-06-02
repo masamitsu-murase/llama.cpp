@@ -1,6 +1,7 @@
-#include "mcp-registry.h"
-
 #include "common.h"
+
+#include "mcp-registry.h"
+#include "server-common.h"
 
 #define JSON_ASSERT GGML_ASSERT
 #include <nlohmann/json.hpp>
