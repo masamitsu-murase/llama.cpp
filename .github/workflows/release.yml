@@ -459,12 +459,12 @@ jobs:
           cache: "npm"
           cache-dependency-path: "tools/ui/package-lock.json"
 
-      - name: ccache
-        uses: ggml-org/ccache-action@v1.2.21
-        with:
-          key: windows-latest-cpu-${{ matrix.arch }}
-          variant: ccache
-          evict-old-files: 1d
+      # - name: ccache
+      #   uses: ggml-org/ccache-action@v1.2.21
+      #   with:
+      #     key: windows-latest-cpu-${{ matrix.arch }}
+      #     variant: ccache
+      #     evict-old-files: 1d
 
       - name: Install Ninja
         run: |
@@ -528,12 +528,12 @@ jobs:
           cache: "npm"
           cache-dependency-path: "tools/ui/package-lock.json"
 
-      - name: ccache
-        uses: ggml-org/ccache-action@v1.2.21
-        with:
-          key: windows-latest-${{ matrix.backend }}-${{ matrix.arch }}
-          variant: ccache
-          evict-old-files: 1d
+      # - name: ccache
+      #   uses: ggml-org/ccache-action@v1.2.21
+      #   with:
+      #     key: windows-latest-${{ matrix.backend }}-${{ matrix.arch }}
+      #     variant: ccache
+      #     evict-old-files: 1d
 
       - name: Install Vulkan SDK
         id: get_vulkan
