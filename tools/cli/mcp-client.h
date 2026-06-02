@@ -1,5 +1,6 @@
 #pragma once
 
+#include "common.h"
 #include "mcp-config.h"
 
 #define JSON_ASSERT GGML_ASSERT
