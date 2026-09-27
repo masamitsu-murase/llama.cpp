@@ -15,6 +15,10 @@ target_link_libraries(${TARGET} PRIVATE
 )
 target_compile_features(${TARGET} PRIVATE cxx_std_17)
 
+add_executable(llama-bonsai llama-bonsai.cpp)
+target_link_libraries(llama-bonsai PRIVATE llama-cli-impl)
+target_compile_features(llama-bonsai PRIVATE cxx_std_17)
+
 # Automatically add all files from the 'licenses' directory
 file(GLOB EXTRA_LICENSES "${CMAKE_SOURCE_DIR}/licenses/LICENSE-*")
 
@@ -28,4 +32,5 @@ license_generate(${TARGET})
 
 if(LLAMA_TOOLS_INSTALL)
     install(TARGETS ${TARGET} RUNTIME)
+    install(TARGETS llama-bonsai RUNTIME)
 endif()

@@ -67,16 +67,32 @@ uint unpack_pq2_0(uint bits) {
     return (bits | (bits << 6u)) & 0x03030303u;
 }
 
+#if defined(DATA_A_PQ2_0_BONSAI_TERNARY)
+uint unpack_pq2_0_bonsai_ternary(uint bits) {
+    bits = unpack_pq2_0(bits);
+    return ((bits ^ 0x80808080u) - 0x01010101u) ^ 0x80808080u;
+}
+#endif
+
 i32vec4 repack4(uint ib, uint iqs) {
     const uint qs_idx = (ib & 3u) * 4u + iqs * 2u;
     const uint bits = pack32(u16vec2(data_a_packed16[ib / 4].qs[qs_idx],
                                      data_a_packed16[ib / 4].qs[qs_idx + 1]));
+#if defined(DATA_A_PQ2_0_BONSAI_TERNARY)
+    return i32vec4(unpack_pq2_0_bonsai_ternary(bits), unpack_pq2_0_bonsai_ternary(bits >> 8u),
+                   unpack_pq2_0_bonsai_ternary(bits >> 16u), unpack_pq2_0_bonsai_ternary(bits >> 24u));
+#else
     return i32vec4(unpack_pq2_0(bits), unpack_pq2_0(bits >> 8u),
                    unpack_pq2_0(bits >> 16u), unpack_pq2_0(bits >> 24u));
+#endif
 }
 
 FLOAT_TYPE mul_q8_1(const int32_t q_sum, const float da, const vec2 dsb, const int32_t sum_divisor) {
+#if defined(DATA_A_PQ2_0_BONSAI_TERNARY)
+    return FLOAT_TYPE(da * float(q_sum) * dsb.x);
+#else
     return FLOAT_TYPE(da * (float(q_sum) * dsb.x - dsb.y / float(sum_divisor)));
+#endif
 }
 #endif
 

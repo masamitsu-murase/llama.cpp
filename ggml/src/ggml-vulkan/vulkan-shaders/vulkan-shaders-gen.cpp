@@ -781,6 +781,15 @@ void process_shaders() {
             string_to_spv("mul_mat_vec_id_" + tname + "_q8_1_f32", mmvq_shader, merge_maps(base_dict, {{"MUL_MAT_ID", "1"}, {data_a_key, "1"}, {"D_TYPE", "float"}, {"FLOAT_TYPE", "float"}, {"FLOAT_TYPEV2", "vec2"}, {"ACC_TYPE", "float"}}));
             string_to_spv("mul_mat_vec_id_" + tname + "_q8_1_f32_subgroup", mmvq_shader, merge_maps(base_dict, {{"MUL_MAT_ID", "1"}, {data_a_key, "1"}, {"D_TYPE", "float"}, {"FLOAT_TYPE", "float"}, {"FLOAT_TYPEV2", "vec2"}, {"ACC_TYPE", "float"}, {"USE_SUBGROUP_ADD", "1"}}));
             string_to_spv("mul_mat_vec_id_" + tname + "_q8_1_f32_subgroup_no_shmem", mmvq_shader, merge_maps(base_dict, {{"MUL_MAT_ID", "1"}, {data_a_key, "1"}, {"D_TYPE", "float"}, {"FLOAT_TYPE", "float"}, {"FLOAT_TYPEV2", "vec2"}, {"ACC_TYPE", "float"}, {"USE_SUBGROUP_ADD_NO_SHMEM", "1"}}));
+
+            if (tname == "pq2_0") {
+                string_to_spv("mul_mat_vec_pq2_0_bonsai_ternary_q8_1_f32", mmvq_shader, merge_maps(base_dict, {{data_a_key, "1"}, {"DATA_A_PQ2_0_BONSAI_TERNARY", "1"}, {"D_TYPE", "float"}, {"FLOAT_TYPE", "float"}, {"FLOAT_TYPEV2", "vec2"}, {"ACC_TYPE", "float"}}));
+                string_to_spv("mul_mat_vec_pq2_0_bonsai_ternary_q8_1_f32_subgroup", mmvq_shader, merge_maps(base_dict, {{data_a_key, "1"}, {"DATA_A_PQ2_0_BONSAI_TERNARY", "1"}, {"D_TYPE", "float"}, {"FLOAT_TYPE", "float"}, {"FLOAT_TYPEV2", "vec2"}, {"ACC_TYPE", "float"}, {"USE_SUBGROUP_ADD", "1"}}));
+                string_to_spv("mul_mat_vec_pq2_0_bonsai_ternary_q8_1_f32_subgroup_no_shmem", mmvq_shader, merge_maps(base_dict, {{data_a_key, "1"}, {"DATA_A_PQ2_0_BONSAI_TERNARY", "1"}, {"D_TYPE", "float"}, {"FLOAT_TYPE", "float"}, {"FLOAT_TYPEV2", "vec2"}, {"ACC_TYPE", "float"}, {"USE_SUBGROUP_ADD_NO_SHMEM", "1"}}));
+                string_to_spv("mul_mat_vec_id_pq2_0_bonsai_ternary_q8_1_f32", mmvq_shader, merge_maps(base_dict, {{"MUL_MAT_ID", "1"}, {data_a_key, "1"}, {"DATA_A_PQ2_0_BONSAI_TERNARY", "1"}, {"D_TYPE", "float"}, {"FLOAT_TYPE", "float"}, {"FLOAT_TYPEV2", "vec2"}, {"ACC_TYPE", "float"}}));
+                string_to_spv("mul_mat_vec_id_pq2_0_bonsai_ternary_q8_1_f32_subgroup", mmvq_shader, merge_maps(base_dict, {{"MUL_MAT_ID", "1"}, {data_a_key, "1"}, {"DATA_A_PQ2_0_BONSAI_TERNARY", "1"}, {"D_TYPE", "float"}, {"FLOAT_TYPE", "float"}, {"FLOAT_TYPEV2", "vec2"}, {"ACC_TYPE", "float"}, {"USE_SUBGROUP_ADD", "1"}}));
+                string_to_spv("mul_mat_vec_id_pq2_0_bonsai_ternary_q8_1_f32_subgroup_no_shmem", mmvq_shader, merge_maps(base_dict, {{"MUL_MAT_ID", "1"}, {data_a_key, "1"}, {"DATA_A_PQ2_0_BONSAI_TERNARY", "1"}, {"D_TYPE", "float"}, {"FLOAT_TYPE", "float"}, {"FLOAT_TYPEV2", "vec2"}, {"ACC_TYPE", "float"}, {"USE_SUBGROUP_ADD_NO_SHMEM", "1"}}));
+            }
         }
 #endif
 
