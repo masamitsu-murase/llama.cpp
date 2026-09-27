@@ -3,6 +3,7 @@ import numpy as np
 import pytest
 
 from gguf.gguf_reader import GGUFReader
+from gguf.scripts.gguf_pq2_bonsai_validate import _first_q3
 
 
 def _write_gguf(path, n_dims_field, dims):
@@ -35,3 +36,19 @@ def test_dims_product_no_uint64_wraparound(tmp_path):
     _write_gguf(p, len(dims), dims)
     with pytest.raises(ValueError):
         GGUFReader(p)
+
+
+@pytest.mark.parametrize("packed_byte", [0x00, 0x55, 0xAA])
+def test_bonsai_validator_accepts_ternary_codes(packed_byte):
+    quants = np.full((2, 32), packed_byte, dtype=np.uint8)
+    assert _first_q3(quants) is None
+
+
+@pytest.mark.parametrize(
+    ("packed_byte", "shift"),
+    [(0x03, 0), (0x0C, 2), (0x30, 4), (0xC0, 6)],
+)
+def test_bonsai_validator_finds_q3_in_each_packed_lane(packed_byte, shift):
+    quants = np.zeros((3, 32), dtype=np.uint8)
+    quants[2, 7] = packed_byte
+    assert _first_q3(quants) == (2, 7, shift)

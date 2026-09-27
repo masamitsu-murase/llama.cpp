@@ -30,7 +30,21 @@ pip install gguf[gui]
 
 [gguf/scripts/gguf_new_metadata.py](https://github.com/ggml-org/llama.cpp/blob/master/gguf-py/gguf/scripts/gguf_new_metadata.py) — Copies a GGUF file with added/modified/removed metadata values.
 
+### Bonsai ternary PQ2_0 validation
+
+Before using the Bonsai-specific Vulkan executable, validate every GGUF file in the model, including all shards of a split model:
+
+```sh
+gguf-pq2-bonsai-validate model-00001.gguf model-00002.gguf
+```
+
+The validator fails if a PQ2_0 tensor has an invalid row width or contains q=3. The specialized kernel is opt-in and does not validate model data at load time; only use it after the validator succeeds for all model files.
+
 [gguf/scripts/gguf_editor_gui.py](https://github.com/ggml-org/llama.cpp/blob/master/gguf-py/gguf/scripts/gguf_editor_gui.py) — Allows for viewing, editing, adding, or removing metadata values within a GGUF file as well as viewing its tensors with a Qt interface.
+
+### Backend-ops Coverage
+
+The existing `test-backend-ops` suite includes deterministic q=0, q=1, q=2, cycling, and mixed PQ2_0 inputs, plus K values from 128 through 16384. Its test mode compares backend results with the CPU reference, and perf mode measures the same cases. Run once with the Bonsai opt-in enabled and once without it to compare the specialized and generic Vulkan paths.
 
 ## Development
 Maintainers who participate in development of this package are advised to install it in editable mode:

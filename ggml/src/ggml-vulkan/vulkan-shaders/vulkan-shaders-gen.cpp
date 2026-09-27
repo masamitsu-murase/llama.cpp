@@ -801,6 +801,13 @@ void process_shaders() {
                 string_to_spv("mul_mat_vec_id_pq2_0_bonsai_ternary_dedicated_q8_1_f32", bonsai_id_shader, bonsai_id_dict);
                 string_to_spv("mul_mat_vec_id_pq2_0_bonsai_ternary_dedicated_q8_1_f32_subgroup", bonsai_id_shader, merge_maps(bonsai_id_dict, {{"USE_SUBGROUP_ADD", "1"}}));
                 string_to_spv("mul_mat_vec_id_pq2_0_bonsai_ternary_dedicated_q8_1_f32_subgroup_no_shmem", bonsai_id_shader, merge_maps(bonsai_id_dict, {{"USE_SUBGROUP_ADD_NO_SHMEM", "1"}}));
+
+                const auto bonsai_xe1_dict = merge_maps(bonsai_dict, {{"BONSAI_PQ2_XE1", "1"}, {"USE_SUBGROUP_ADD_NO_SHMEM", "1"}});
+                const auto bonsai_xe2_dict = merge_maps(bonsai_dict, {{"BONSAI_PQ2_XE2", "1"}, {"USE_SUBGROUP_ADD_NO_SHMEM", "1"}});
+                string_to_spv("mul_mat_vec_pq2_0_bonsai_ternary_dedicated_xe1_q8_1_f32_subgroup_no_shmem", bonsai_shader, bonsai_xe1_dict);
+                string_to_spv("mul_mat_vec_pq2_0_bonsai_ternary_dedicated_xe2_q8_1_f32_subgroup_no_shmem", bonsai_shader, bonsai_xe2_dict);
+                string_to_spv("mul_mat_vec_id_pq2_0_bonsai_ternary_dedicated_xe1_q8_1_f32_subgroup_no_shmem", bonsai_id_shader, merge_maps(bonsai_id_dict, {{"BONSAI_PQ2_XE1", "1"}, {"USE_SUBGROUP_ADD_NO_SHMEM", "1"}}));
+                string_to_spv("mul_mat_vec_id_pq2_0_bonsai_ternary_dedicated_xe2_q8_1_f32_subgroup_no_shmem", bonsai_id_shader, merge_maps(bonsai_id_dict, {{"BONSAI_PQ2_XE2", "1"}, {"USE_SUBGROUP_ADD_NO_SHMEM", "1"}}));
             }
         }
 #endif

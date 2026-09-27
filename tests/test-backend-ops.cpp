@@ -4686,7 +4686,67 @@ struct test_mul_mat_hadamard : public test_mul_mat {
     }
 };
 
-// sign flip + reshape + FWHT-hint matmul, the fusable Hadamard activation path
+enum class bonsai_pq2_pattern {
+    ZERO,
+    ONE,
+    TWO,
+    CYCLE,
+    MIXED,
+};
+
+struct test_mul_mat_bonsai_pq2 : public test_mul_mat {
+    const bonsai_pq2_pattern pattern;
+
+    test_mul_mat_bonsai_pq2(bonsai_pq2_pattern pattern, int64_t m, int64_t n, int64_t k)
+        : test_mul_mat(GGML_TYPE_PQ2_0, GGML_TYPE_F32, m, n, k, {1, 1}, {1, 1}), pattern(pattern) {}
+
+    std::string vars() override {
+        return test_mul_mat::vars() + " bonsai_pattern=" + std::to_string(static_cast<int>(pattern));
+    }
+
+    void initialize_tensors(ggml_context * ctx) override {
+        for (ggml_tensor * t = ggml_get_first_tensor(ctx); t != nullptr; t = ggml_get_next_tensor(ctx, t)) {
+            if (strcmp(t->name, "b") == 0) {
+                std::vector<float> data(ggml_nelements(t));
+                for (size_t i = 0; i < data.size(); ++i) {
+                    data[i] = float(int((i * 17) % 101) - 50) / 50.0f;
+                }
+                ggml_backend_tensor_set(t, data.data(), 0, data.size() * sizeof(float));
+                continue;
+            }
+            if (strcmp(t->name, "a") != 0) {
+                init_tensor_uniform(t);
+                continue;
+            }
+
+            constexpr size_t block_size = 128;
+            constexpr size_t block_bytes = 34;
+            GGML_ASSERT(t->type == GGML_TYPE_PQ2_0);
+            GGML_ASSERT(ggml_nelements(t) % block_size == 0);
+            GGML_ASSERT(ggml_type_size(t->type) == block_bytes);
+
+            const size_t block_count = ggml_nelements(t) / block_size;
+            std::vector<uint8_t> data(ggml_nbytes(t), 0);
+            for (size_t block = 0; block < block_count; ++block) {
+                const ggml_fp16_t d = ggml_fp32_to_fp16(0.5f + 0.125f * float(block % 4));
+                memcpy(data.data() + block * block_bytes, &d, sizeof(d));
+                for (size_t i = 0; i < block_size; ++i) {
+                    uint8_t q = 0;
+                    switch (pattern) {
+                        case bonsai_pq2_pattern::ZERO:  q = 0; break;
+                        case bonsai_pq2_pattern::ONE:   q = 1; break;
+                        case bonsai_pq2_pattern::TWO:   q = 2; break;
+                        case bonsai_pq2_pattern::CYCLE: q = uint8_t((i + block) % 3); break;
+                        case bonsai_pq2_pattern::MIXED: q = uint8_t((i * 17 + block * 13 + (i >> 2)) % 3); break;
+                    }
+                    data[block * block_bytes + sizeof(d) + i / 4] |= uint8_t(q << (2 * (i % 4)));
+                }
+            }
+            ggml_backend_tensor_set(t, data.data(), 0, data.size());
+        }
+    }
+};
+
 struct test_fwht_signed : public test_case {
     const int64_t blk;
     const int64_t width;
@@ -9298,6 +9358,15 @@ static std::vector<std::unique_ptr<test_case>> make_test_cases_eval() {
     }
 
     // PTQ1_0 / PQ2_0 integer-dot mat-vec: Bonsai-2 shapes, odd row counts (row tail), batches and multi-column B
+    for (bonsai_pq2_pattern pattern : {bonsai_pq2_pattern::ZERO, bonsai_pq2_pattern::ONE,
+                                       bonsai_pq2_pattern::TWO, bonsai_pq2_pattern::CYCLE,
+                                       bonsai_pq2_pattern::MIXED}) {
+        test_cases.emplace_back(new test_mul_mat_bonsai_pq2(pattern, 3, 2, 128));
+    }
+    for (int64_t k : {128, 256, 512, 1024, 4096, 16384}) {
+        test_cases.emplace_back(new test_mul_mat_bonsai_pq2(bonsai_pq2_pattern::MIXED, 1, 1, k));
+    }
+
     for (int64_t n : {1, 2, 3, 4, 5, 6, 7, 8}) {
         for (int64_t k : {1024, 5120, 6144, 17408}) {
             test_cases.emplace_back(new test_mul_mat(GGML_TYPE_PTQ1_0, GGML_TYPE_F32, 67, n, k, {1, 1}, {1, 1}));

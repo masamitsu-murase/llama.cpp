@@ -14,6 +14,10 @@ layout(local_size_x_id = 0, local_size_y = 1, local_size_z = 1) in;
 #error This shader only supports validated Bonsai ternary PQ2_0
 #endif
 
+#if defined(BONSAI_PQ2_XE1) && defined(BONSAI_PQ2_XE2)
+#error Select only one Bonsai PQ2 subgroup mapping
+#endif
+
 #define K_PER_ITER 16
 
 uint a_offset, b_offset, d_offset;
@@ -38,6 +42,43 @@ i32vec4 pq2_load16(const uint ib, const uint iqs) {
     return i32vec4(int32_t(pq2_ternary4(bits)), int32_t(pq2_ternary4(bits >> 8u)),
                    int32_t(pq2_ternary4(bits >> 16u)), int32_t(pq2_ternary4(bits >> 24u)));
 }
+
+#if defined(BONSAI_PQ2_XE1)
+FLOAT_TYPE pq2_dot_lane(const uint a_block_base, const uint b_block_base, const uint lane, const float da) {
+    const uint chunk32 = lane >> 1u;
+    const uint half16 = lane & 1u;
+    const i32vec4 qs_a = pq2_load16(a_block_base + chunk32, half16);
+    const uint b_block_idx = b_block_base + chunk32;
+    const uint b_outer = b_block_idx / 4u;
+    const uint b_inner = b_block_idx & 3u;
+    const uint b_qs_idx = b_inner * 8u + half16 * 4u;
+    int32_t q_sum = 0;
+    q_sum += dotPacked4x8EXT(qs_a.x, data_b[b_outer].qs[b_qs_idx]);
+    q_sum += dotPacked4x8EXT(qs_a.y, data_b[b_outer].qs[b_qs_idx + 1u]);
+    q_sum += dotPacked4x8EXT(qs_a.z, data_b[b_outer].qs[b_qs_idx + 2u]);
+    q_sum += dotPacked4x8EXT(qs_a.w, data_b[b_outer].qs[b_qs_idx + 3u]);
+    const float db = float(vec2(data_b[b_outer].ds[b_inner]).x);
+    return FLOAT_TYPE(da * db * float(q_sum));
+}
+#elif defined(BONSAI_PQ2_XE2)
+FLOAT_TYPE pq2_dot_lane(const uint a_block_base, const uint b_block_base, const uint lane, const float da) {
+    const uint chunk32 = lane >> 2u;
+    const uint half8 = lane & 3u;
+    const uint a_idx = ((a_block_base + chunk32) & 3u) * 4u + half8;
+    const uint bits = uint(data_a_packed16[(a_block_base + chunk32) / 4u].qs[a_idx]);
+    const int32_t qs_a0 = int32_t(pq2_ternary4(bits & 0xffu));
+    const int32_t qs_a1 = int32_t(pq2_ternary4(bits >> 8u));
+    const uint b_block_idx = b_block_base + chunk32;
+    const uint b_outer = b_block_idx / 4u;
+    const uint b_inner = b_block_idx & 3u;
+    const uint b_qs_idx = b_inner * 8u + half8 * 2u;
+    int32_t q_sum = 0;
+    q_sum += dotPacked4x8EXT(qs_a0, data_b[b_outer].qs[b_qs_idx]);
+    q_sum += dotPacked4x8EXT(qs_a1, data_b[b_outer].qs[b_qs_idx + 1u]);
+    const float db = float(vec2(data_b[b_outer].ds[b_inner]).x);
+    return FLOAT_TYPE(da * db * float(q_sum));
+}
+#endif
 
 FLOAT_TYPE mmvq_dot_product(const uint ib_a, const uint iqs) {
     const i32vec4 qs_a = pq2_load16(ib_a, iqs);
@@ -85,6 +126,22 @@ void compute_outputs(const uint32_t first_row, const uint32_t num_rows) {
         }
     }
 
+#if defined(BONSAI_PQ2_XE1) || defined(BONSAI_PQ2_XE2)
+    const uint num_blocks = p.ncols / QUANT_K;
+    [[unroll]] for (uint j = 0; j < NUM_COLS; ++j) {
+        [[unroll]] for (uint n = 0; n < num_rows; ++n) {
+            for (uint block = 0; block < num_blocks; ++block) {
+                const uint a_block_base = ((first_row + n) * p.ncols + block * QUANT_K) / QUANT_K_Q8_1 + a_offset;
+                const uint b_block_base = (j * p.batch_stride_b + block * QUANT_K) / QUANT_K_Q8_1 + b_offset;
+                const float da = float(data_a[a_block_base / 4u].d);
+                temp[j][n] += pq2_dot_lane(a_block_base, b_block_base, tid, da);
+            }
+        }
+    }
+
+    reduce_result(temp, d_offset, first_row, num_rows, tid);
+#else
+
     const uint col_stride = K_PER_ITER * BLOCK_SIZE;
     uint num_iters = p.ncols / col_stride;
     if (num_iters * col_stride + K_PER_ITER * tid < p.ncols) {
@@ -114,6 +171,7 @@ void compute_outputs(const uint32_t first_row, const uint32_t num_rows) {
     }
 
     reduce_result(temp, d_offset, first_row, num_rows, tid);
+#endif
 }
 
 void main() {

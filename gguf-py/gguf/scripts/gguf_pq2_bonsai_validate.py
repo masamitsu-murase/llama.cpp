@@ -15,6 +15,19 @@ PQ2_QUANT_BYTES = 32
 BLOCKS_PER_CHUNK = 1 << 18
 
 
+def _first_q3(quants: np.ndarray) -> tuple[int, int, int] | None:
+    matches = np.flatnonzero((quants & (quants >> 1) & 0x55) != 0)
+    if matches.size == 0:
+        return None
+
+    block_offset, byte_offset = divmod(int(matches[0]), PQ2_QUANT_BYTES)
+    byte = int(quants[block_offset, byte_offset])
+    for shift in (0, 2, 4, 6):
+        if ((byte >> shift) & 0x03) == 0x03:
+            return block_offset, byte_offset, shift
+    raise AssertionError("q=3 candidate byte did not contain q=3")
+
+
 def validate_model(path: Path) -> tuple[int, int]:
     reader = GGUFReader(path, "r")
     tensor_count = 0
@@ -38,16 +51,13 @@ def validate_model(path: Path) -> tuple[int, int]:
         for block_start in range(0, blocks.shape[0], BLOCKS_PER_CHUNK):
             block_end = min(block_start + BLOCKS_PER_CHUNK, blocks.shape[0])
             quants = blocks[block_start:block_end, 2:]
-            matches = np.flatnonzero((quants & (quants >> 1) & 0x55) != 0)
-            if matches.size == 0:
+            q3 = _first_q3(quants)
+            if q3 is None:
                 continue
 
-            block_offset, byte_offset = divmod(int(matches[0]), PQ2_QUANT_BYTES)
-            byte = int(quants[block_offset, byte_offset])
-            for shift in (0, 2, 4, 6):
-                if ((byte >> shift) & 0x03) == 0x03:
-                    element = ((block_start + block_offset) * PQ2_BLOCK_SIZE + byte_offset * 4 + shift // 2)
-                    raise ValueError(f"{path}: {tensor.name}: q=3 at element {element}")
+            block_offset, byte_offset, shift = q3
+            element = ((block_start + block_offset) * PQ2_BLOCK_SIZE + byte_offset * 4 + shift // 2)
+            raise ValueError(f"{path}: {tensor.name}: q=3 at element {element}")
 
     return tensor_count, quant_count
 

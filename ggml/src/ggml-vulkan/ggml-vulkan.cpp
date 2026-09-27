@@ -935,6 +935,8 @@ struct vk_device_struct {
     vk_pipeline pipeline_dequant_mul_mat_vec_id_q8_1_pq2_bonsai_ternary_f32[DMMV_WG_SIZE_COUNT];
     vk_pipeline pipeline_dequant_mul_mat_vec_q8_1_pq2_bonsai_ternary_dedicated_f32[DMMV_WG_SIZE_COUNT][mul_mat_vec_max_cols];
     vk_pipeline pipeline_dequant_mul_mat_vec_id_q8_1_pq2_bonsai_ternary_dedicated_f32[DMMV_WG_SIZE_COUNT];
+    vk_pipeline pipeline_dequant_mul_mat_vec_q8_1_pq2_bonsai_ternary_xe_f32[mul_mat_vec_max_cols];
+    vk_pipeline pipeline_dequant_mul_mat_vec_id_q8_1_pq2_bonsai_ternary_xe_f32;
 
     vk_pipeline pipeline_mul_mat_vec_p021_f16_f32[p021_max_gqa_ratio];
     vk_pipeline pipeline_mul_mat_vec_nc_f16_f32;
@@ -5349,6 +5351,21 @@ static void ggml_vk_load_shaders(vk_device& device, vk_pipeline requested) {
                     ggml_vk_create_pipeline(device, device->pipeline_dequant_mul_mat_vec_q8_1_pq2_bonsai_ternary_f32[w][i], "mul_mat_vec_pq2_0_bonsai_ternary_q8_1_f32", arr_dmmv_pq2_0_bonsai_ternary_q8_1_f32_len[reduc], arr_dmmv_pq2_0_bonsai_ternary_q8_1_f32_data[reduc], "main", mul_mat_vec_num_bindings, sizeof(vk_mat_vec_push_constants), {2*rm_kq_int, 1, 1}, {wg_size_subgroup_int, 2*rm_kq_int, i+1}, 1, true, use_subgroups, subgroup_size_int);
                     ggml_vk_create_pipeline(device, device->pipeline_dequant_mul_mat_vec_q8_1_pq2_bonsai_ternary_dedicated_f32[w][i], "mul_mat_vec_pq2_0_bonsai_ternary_dedicated_q8_1_f32", arr_dmmv_pq2_0_bonsai_ternary_dedicated_q8_1_f32_len[reduc], arr_dmmv_pq2_0_bonsai_ternary_dedicated_q8_1_f32_data[reduc], "main", mul_mat_vec_num_bindings, sizeof(vk_mat_vec_push_constants), {2*rm_kq_int, 1, 1}, {wg_size_subgroup_int, 2*rm_kq_int, i+1}, 1, true, use_subgroups, subgroup_size_int);
                 }
+                if (w == DMMV_WG_SIZE_SUBGROUP && device->subgroup_size_control && device->subgroup_arithmetic &&
+                    device->integer_dot_product_4x8_signed_accelerated &&
+                    (device->architecture == vk_device_architecture::INTEL_XE1 || device->architecture == vk_device_architecture::INTEL_XE2)) {
+                    const bool is_xe1 = device->architecture == vk_device_architecture::INTEL_XE1;
+                    const uint32_t bonsai_subgroup_size = is_xe1 ? 8u : 16u;
+                    if (device->subgroup_min_size <= bonsai_subgroup_size && bonsai_subgroup_size <= device->subgroup_max_size) {
+                        const char * shader_name = is_xe1 ? "mul_mat_vec_pq2_0_bonsai_ternary_dedicated_xe1_q8_1_f32_subgroup_no_shmem" :
+                                                            "mul_mat_vec_pq2_0_bonsai_ternary_dedicated_xe2_q8_1_f32_subgroup_no_shmem";
+                        const uint64_t shader_len = is_xe1 ? mul_mat_vec_pq2_0_bonsai_ternary_dedicated_xe1_q8_1_f32_subgroup_no_shmem_len :
+                                                             mul_mat_vec_pq2_0_bonsai_ternary_dedicated_xe2_q8_1_f32_subgroup_no_shmem_len;
+                        const void * shader_data = is_xe1 ? mul_mat_vec_pq2_0_bonsai_ternary_dedicated_xe1_q8_1_f32_subgroup_no_shmem_data :
+                                                           mul_mat_vec_pq2_0_bonsai_ternary_dedicated_xe2_q8_1_f32_subgroup_no_shmem_data;
+                        ggml_vk_create_pipeline(device, device->pipeline_dequant_mul_mat_vec_q8_1_pq2_bonsai_ternary_xe_f32[i], shader_name, shader_len, shader_data, "main", mul_mat_vec_num_bindings, sizeof(vk_mat_vec_push_constants), {2*rm_kq_int, 1, 1}, {bonsai_subgroup_size, 2*rm_kq_int, i+1}, 1, true, true, bonsai_subgroup_size);
+                    }
+                }
                 ggml_vk_create_pipeline(device, device->pipeline_dequant_mul_mat_vec_q8_1_f32[w][GGML_TYPE_Q4_0][i], "mul_mat_vec_q4_0_q8_1_f32", arr_dmmv_q4_0_q8_1_f32_len[reduc], arr_dmmv_q4_0_q8_1_f32_data[reduc], "main", mul_mat_vec_num_bindings, sizeof(vk_mat_vec_push_constants), {1*rm_stdq_int, 1, 1}, {wg_size_subgroup_int, 1*rm_stdq_int, i+1}, 1, true, use_subgroups, subgroup_size_int);
                 ggml_vk_create_pipeline(device, device->pipeline_dequant_mul_mat_vec_q8_1_f32[w][GGML_TYPE_Q4_1][i], "mul_mat_vec_q4_1_q8_1_f32", arr_dmmv_q4_1_q8_1_f32_len[reduc], arr_dmmv_q4_1_q8_1_f32_data[reduc], "main", mul_mat_vec_num_bindings, sizeof(vk_mat_vec_push_constants), {1*rm_stdq_int, 1, 1}, {wg_size_subgroup_int, 1*rm_stdq_int, i+1}, 1, true, use_subgroups, subgroup_size_int);
                 ggml_vk_create_pipeline(device, device->pipeline_dequant_mul_mat_vec_q8_1_f32[w][GGML_TYPE_Q5_0][i], "mul_mat_vec_q5_0_q8_1_f32", arr_dmmv_q5_0_q8_1_f32_len[reduc], arr_dmmv_q5_0_q8_1_f32_data[reduc], "main", mul_mat_vec_num_bindings, sizeof(vk_mat_vec_push_constants), {1*rm_stdq_int, 1, 1}, {wg_size_subgroup_int, 1*rm_stdq_int, i+1}, 1, true, use_subgroups, subgroup_size_int);
@@ -5412,6 +5429,21 @@ static void ggml_vk_load_shaders(vk_device& device, vk_pipeline requested) {
                 (device->architecture == vk_device_architecture::INTEL_XE1 || device->architecture == vk_device_architecture::INTEL_XE2)) {
                 ggml_vk_create_pipeline(device, device->pipeline_dequant_mul_mat_vec_id_q8_1_pq2_bonsai_ternary_f32[w], "mul_mat_vec_id_pq2_0_bonsai_ternary_q8_1_f32", arr_dmmv_id_pq2_0_bonsai_ternary_q8_1_f32_len[reduc], arr_dmmv_id_pq2_0_bonsai_ternary_q8_1_f32_data[reduc], "main", mul_mat_vec_id_num_bindings, sizeof(vk_mat_vec_id_push_constants), {2*rm_kq_int, 1, 1}, {wg_size_subgroup_int, 2*rm_kq_int}, 1, true, use_subgroups, subgroup_size_int);
                 ggml_vk_create_pipeline(device, device->pipeline_dequant_mul_mat_vec_id_q8_1_pq2_bonsai_ternary_dedicated_f32[w], "mul_mat_vec_id_pq2_0_bonsai_ternary_dedicated_q8_1_f32", arr_dmmv_id_pq2_0_bonsai_ternary_dedicated_q8_1_f32_len[reduc], arr_dmmv_id_pq2_0_bonsai_ternary_dedicated_q8_1_f32_data[reduc], "main", mul_mat_vec_id_num_bindings, sizeof(vk_mat_vec_id_push_constants), {2*rm_kq_int, 1, 1}, {wg_size_subgroup_int, 2*rm_kq_int}, 1, true, use_subgroups, subgroup_size_int);
+            }
+            if (w == DMMV_WG_SIZE_SUBGROUP && device->subgroup_size_control && device->subgroup_arithmetic &&
+                device->integer_dot_product_4x8_signed_accelerated &&
+                (device->architecture == vk_device_architecture::INTEL_XE1 || device->architecture == vk_device_architecture::INTEL_XE2)) {
+                const bool is_xe1 = device->architecture == vk_device_architecture::INTEL_XE1;
+                const uint32_t bonsai_subgroup_size = is_xe1 ? 8u : 16u;
+                if (device->subgroup_min_size <= bonsai_subgroup_size && bonsai_subgroup_size <= device->subgroup_max_size) {
+                    const char * shader_name = is_xe1 ? "mul_mat_vec_id_pq2_0_bonsai_ternary_dedicated_xe1_q8_1_f32_subgroup_no_shmem" :
+                                                        "mul_mat_vec_id_pq2_0_bonsai_ternary_dedicated_xe2_q8_1_f32_subgroup_no_shmem";
+                    const uint64_t shader_len = is_xe1 ? mul_mat_vec_id_pq2_0_bonsai_ternary_dedicated_xe1_q8_1_f32_subgroup_no_shmem_len :
+                                                         mul_mat_vec_id_pq2_0_bonsai_ternary_dedicated_xe2_q8_1_f32_subgroup_no_shmem_len;
+                    const void * shader_data = is_xe1 ? mul_mat_vec_id_pq2_0_bonsai_ternary_dedicated_xe1_q8_1_f32_subgroup_no_shmem_data :
+                                                       mul_mat_vec_id_pq2_0_bonsai_ternary_dedicated_xe2_q8_1_f32_subgroup_no_shmem_data;
+                    ggml_vk_create_pipeline(device, device->pipeline_dequant_mul_mat_vec_id_q8_1_pq2_bonsai_ternary_xe_f32, shader_name, shader_len, shader_data, "main", mul_mat_vec_id_num_bindings, sizeof(vk_mat_vec_id_push_constants), {2*rm_kq_int, 1, 1}, {bonsai_subgroup_size, 2*rm_kq_int}, 1, true, true, bonsai_subgroup_size);
+                }
             }
             ggml_vk_create_pipeline(device, device->pipeline_dequant_mul_mat_vec_id_q8_1_f32[w][GGML_TYPE_Q4_0], "mul_mat_vec_id_q4_0_q8_1_f32", arr_dmmv_id_q4_0_q8_1_f32_len[reduc], arr_dmmv_id_q4_0_q8_1_f32_data[reduc], "main", mul_mat_vec_id_num_bindings, sizeof(vk_mat_vec_id_push_constants), {1*rm_stdq_int, 1, 1}, {wg_size_subgroup_int, 1*rm_stdq_int}, 1, true, use_subgroups, subgroup_size_int);
             ggml_vk_create_pipeline(device, device->pipeline_dequant_mul_mat_vec_id_q8_1_f32[w][GGML_TYPE_Q4_1], "mul_mat_vec_id_q4_1_q8_1_f32", arr_dmmv_id_q4_1_q8_1_f32_len[reduc], arr_dmmv_id_q4_1_q8_1_f32_data[reduc], "main", mul_mat_vec_id_num_bindings, sizeof(vk_mat_vec_id_push_constants), {1*rm_stdq_int, 1, 1}, {wg_size_subgroup_int, 1*rm_stdq_int}, 1, true, use_subgroups, subgroup_size_int);
@@ -7943,6 +7975,15 @@ static vk_pipeline ggml_vk_get_dequantize_mul_mat_vec(ggml_backend_vk_context * 
         }
         if (a_type == GGML_TYPE_PQ2_0 && getenv("GGML_VK_PQ2_BONSAI_TERNARY_DEDICATED") != nullptr &&
             ctx->device->integer_dot_product_4x8_signed_accelerated && ctx->device->subgroup_size_control &&
+            ctx->device->subgroup_arithmetic &&
+            (ctx->device->architecture == vk_device_architecture::INTEL_XE1 || ctx->device->architecture == vk_device_architecture::INTEL_XE2)) {
+            const vk_pipeline pipeline = ctx->device->pipeline_dequant_mul_mat_vec_q8_1_pq2_bonsai_ternary_xe_f32[num_cols-1];
+            if (pipeline != nullptr) {
+                return pipeline;
+            }
+        }
+        if (a_type == GGML_TYPE_PQ2_0 && getenv("GGML_VK_PQ2_BONSAI_TERNARY_DEDICATED") != nullptr &&
+            ctx->device->integer_dot_product_4x8_signed_accelerated && ctx->device->subgroup_size_control &&
             (ctx->device->architecture == vk_device_architecture::INTEL_XE1 || ctx->device->architecture == vk_device_architecture::INTEL_XE2)) {
             const vk_pipeline pipeline = ctx->device->pipeline_dequant_mul_mat_vec_q8_1_pq2_bonsai_ternary_dedicated_f32[dmmv_wg][num_cols-1];
             if (pipeline != nullptr) {
@@ -8136,6 +8177,14 @@ static vk_pipeline ggml_vk_get_dequantize_mul_mat_vec_id(ggml_backend_vk_context
             dmmv_wg = DMMV_WG_SIZE_SUBGROUP;
         }
         if (a_type == GGML_TYPE_PQ2_0 && getenv("GGML_VK_PQ2_BONSAI_TERNARY_DEDICATED") != nullptr &&
+            ctx->device->integer_dot_product_4x8_signed_accelerated && ctx->device->subgroup_size_control && ctx->device->subgroup_arithmetic &&
+            (ctx->device->architecture == vk_device_architecture::INTEL_XE1 || ctx->device->architecture == vk_device_architecture::INTEL_XE2)) {
+            const vk_pipeline pipeline = ctx->device->pipeline_dequant_mul_mat_vec_id_q8_1_pq2_bonsai_ternary_xe_f32;
+            if (pipeline != nullptr) {
+                return pipeline;
+            }
+        }
+        if (a_type == GGML_TYPE_PQ2_0 && getenv("GGML_VK_PQ2_BONSAI_TERNARY_DEDICATED") != nullptr &&
             ctx->device->integer_dot_product_4x8_signed_accelerated && ctx->device->subgroup_size_control &&
             (ctx->device->architecture == vk_device_architecture::INTEL_XE1 || ctx->device->architecture == vk_device_architecture::INTEL_XE2)) {
             const vk_pipeline pipeline = ctx->device->pipeline_dequant_mul_mat_vec_id_q8_1_pq2_bonsai_ternary_dedicated_f32[dmmv_wg];
@@ -8143,7 +8192,7 @@ static vk_pipeline ggml_vk_get_dequantize_mul_mat_vec_id(ggml_backend_vk_context
                 return pipeline;
             }
         }
-            const vk_pipeline pipeline = ctx->device->pipeline_dequant_mul_mat_vec_id_q8_1_pq2_bonsai_ternary_f32[dmmv_wg];
+        if (a_type == GGML_TYPE_PQ2_0 && getenv("GGML_VK_PQ2_BONSAI_TERNARY") != nullptr &&
             ctx->device->integer_dot_product_4x8_signed_accelerated && ctx->device->subgroup_size_control &&
             (ctx->device->architecture == vk_device_architecture::INTEL_XE1 || ctx->device->architecture == vk_device_architecture::INTEL_XE2)) {
             const vk_pipeline pipeline = ctx->device->pipeline_dequant_mul_mat_vec_id_q8_1_pq2_bonsai_ternary_f32[dmmv_wg];
