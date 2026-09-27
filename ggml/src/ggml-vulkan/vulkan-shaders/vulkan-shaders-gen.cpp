@@ -789,6 +789,18 @@ void process_shaders() {
                 string_to_spv("mul_mat_vec_id_pq2_0_bonsai_ternary_q8_1_f32", mmvq_shader, merge_maps(base_dict, {{"MUL_MAT_ID", "1"}, {data_a_key, "1"}, {"DATA_A_PQ2_0_BONSAI_TERNARY", "1"}, {"D_TYPE", "float"}, {"FLOAT_TYPE", "float"}, {"FLOAT_TYPEV2", "vec2"}, {"ACC_TYPE", "float"}}));
                 string_to_spv("mul_mat_vec_id_pq2_0_bonsai_ternary_q8_1_f32_subgroup", mmvq_shader, merge_maps(base_dict, {{"MUL_MAT_ID", "1"}, {data_a_key, "1"}, {"DATA_A_PQ2_0_BONSAI_TERNARY", "1"}, {"D_TYPE", "float"}, {"FLOAT_TYPE", "float"}, {"FLOAT_TYPEV2", "vec2"}, {"ACC_TYPE", "float"}, {"USE_SUBGROUP_ADD", "1"}}));
                 string_to_spv("mul_mat_vec_id_pq2_0_bonsai_ternary_q8_1_f32_subgroup_no_shmem", mmvq_shader, merge_maps(base_dict, {{"MUL_MAT_ID", "1"}, {data_a_key, "1"}, {"DATA_A_PQ2_0_BONSAI_TERNARY", "1"}, {"D_TYPE", "float"}, {"FLOAT_TYPE", "float"}, {"FLOAT_TYPEV2", "vec2"}, {"ACC_TYPE", "float"}, {"USE_SUBGROUP_ADD_NO_SHMEM", "1"}}));
+
+                const std::string bonsai_shader = "mul_mat_vecq_pq2_bonsai_ternary.comp";
+                const auto bonsai_dict = merge_maps(base_dict, {{data_a_key, "1"}, {"DATA_A_PQ2_0_BONSAI_TERNARY", "1"}, {"D_TYPE", "float"}, {"FLOAT_TYPE", "float"}, {"FLOAT_TYPEV2", "vec2"}, {"ACC_TYPE", "float"}});
+                string_to_spv("mul_mat_vec_pq2_0_bonsai_ternary_dedicated_q8_1_f32", bonsai_shader, bonsai_dict);
+                string_to_spv("mul_mat_vec_pq2_0_bonsai_ternary_dedicated_q8_1_f32_subgroup", bonsai_shader, merge_maps(bonsai_dict, {{"USE_SUBGROUP_ADD", "1"}}));
+                string_to_spv("mul_mat_vec_pq2_0_bonsai_ternary_dedicated_q8_1_f32_subgroup_no_shmem", bonsai_shader, merge_maps(bonsai_dict, {{"USE_SUBGROUP_ADD_NO_SHMEM", "1"}}));
+
+                const std::string bonsai_id_shader = "mul_mat_vecq_pq2_bonsai_ternary.comp";
+                const auto bonsai_id_dict = merge_maps(bonsai_dict, {{"MUL_MAT_ID", "1"}});
+                string_to_spv("mul_mat_vec_id_pq2_0_bonsai_ternary_dedicated_q8_1_f32", bonsai_id_shader, bonsai_id_dict);
+                string_to_spv("mul_mat_vec_id_pq2_0_bonsai_ternary_dedicated_q8_1_f32_subgroup", bonsai_id_shader, merge_maps(bonsai_id_dict, {{"USE_SUBGROUP_ADD", "1"}}));
+                string_to_spv("mul_mat_vec_id_pq2_0_bonsai_ternary_dedicated_q8_1_f32_subgroup_no_shmem", bonsai_id_shader, merge_maps(bonsai_id_dict, {{"USE_SUBGROUP_ADD_NO_SHMEM", "1"}}));
             }
         }
 #endif
