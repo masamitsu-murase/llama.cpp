@@ -1,10 +1,11 @@
 # 目的
 
 PrismML-Eng/llama.cpp の ggml/src/ggml-vulkan に対して、
-PQ2_0 を fixed group-128 signed 2-bit format として直接処理する
-Vulkan GLSL shader を実装する。Bonsai 2 では q=3 が現れないことを
-期待できるが、GGML_TYPE_PQ2_0 自体は {-1, 0, +1, +2} を表現する。
-したがって shader は q=3 も +2 として正しく処理しなければならない。
+Ternary Bonsai 2 の PQ2_0 weight だけを対象に、fixed group-128 ternary
+weight {-1, 0, +1} を直接処理する Vulkan GLSL shader を実装する。
+この specialized path の入力 contract は、対象 model の PQ2_0 codes が
+q in {0, 1, 2} であり q=3 を含まないことである。GGML_TYPE_PQ2_0 一般は
+{-1, 0, +1, +2} を表現するため、通常の PQ2_0 path の置換には使わない。
 
 最終目的は Intel GPU 上で Vulkan backend を使用した
 Ternary Bonsai 2 27B の推論速度を最大化することである。
@@ -83,11 +84,11 @@ Bonsai 2 の ternary weight では q は基本的に
 
 重要:
 
-「ternary 専用」とは q=3 を無視するという意味ではない。
-
-実際の Bonsai 2 データで q=3 が存在しないことは format の保証ではない。
-q=3 の不在を host-side selection の条件にしてはならず、decoder 自体は
-q=3 -> +2 になるようにしておく。
+q=3 が存在しないことは format の保証ではなく、この Bonsai-only path の
+明示的な入力 contract である。model load 時または開発時の offline validation
+で全 PQ2_0 weight tensor に q=3 がないことを確認する。GGML_TYPE_PQ2_0
+だけを根拠に automatic selection してはならない。runtime に q=3 check や
+q=3 branch は入れず、decoder は branch なしで q - 1 を計算する。
 
 ---
 
@@ -119,11 +120,11 @@ const uint bits =
 
 ---
 
-# 4. signed decoder を実装する
+# 4. Bonsai ternary decoder を実装する
 
-q=0,1,2,3 を signed int8 の bit pattern
+target input の q=0,1,2 を signed int8 の bit pattern
 
-    -1,0,+1,+2
+    -1,0,+1
 
 へ変換する。
 
@@ -148,7 +149,7 @@ uint pq2_ternary4(uint bits)
     0 -> FF (-1)
     1 -> 00 ( 0)
     2 -> 01 (+1)
-    3 -> 02 (+2)
+    3 -> 02 (+2) (target contract 外だが branch なしで自然に処理される)
 
 となる。
 
@@ -214,7 +215,7 @@ int32_t pq2_dot16(
 現在の `mul_mat_vecq.comp` の PQ2_0 Q8_1 path は、すでに
 `dotPacked4x8EXT()` を4回使用している。Phase 1 の目的は DP4A の
 新規導入ではなく、A を unsigned q ではなく signed (q - 1) として
-pack した場合にも、scale を含む最終 output を一致させることである。
+pack した場合にも、Bonsai ternary input の最終 output を一致させることである。
 
 ---
 
@@ -258,7 +259,7 @@ int8 のビット列および `q_sum` が `repack4()` と同じになること�
 
 ---
 
-# 7. まず既存汎用 shader と同じ最終計算結果を作る
+# 7. まず Bonsai ternary input で既存 shader と同じ最終計算結果を作る
 
 いきなり subgroup 最適化をしない。
 
@@ -266,13 +267,14 @@ int8 のビット列および `q_sum` が `repack4()` と同じになること�
 
     mul_mat_vecq.comp
 
-の PQ2_0 path の decoder を signed decoder に置き換える形で実装する。
+の PQ2_0 path の decoder を Bonsai ternary decoder に置き換える形で実装する。
 目的は decoder と DP4A の correctness を確認することである。
 
 既存 path の `q_sum` は unsigned q の dot product である。signed (q - 1)
 を DP4A に渡す `q_sum` と同じ値にはならないため、`q_sum` 単体を比較対象に
 してはならない。scale と Q8_1 correction を含む最終 output を、既存
-generic shader と CPU reference に比較する。
+generic shader と CPU reference に比較する。q=3 を含む PQ2_0 tensor は
+この specialized path の correctness input ではなく、generic path に残す。
 
 ---
 
@@ -302,24 +304,24 @@ decoder、dot product、scale formula は不可分の組として実装し、異
 
 ---
 
-# 9. 次に専用 PQ2_0 signed shader を作る
+# 9. 次に専用 PQ2_0 Bonsai ternary shader を作る
 
 第一段階の correctness が確認できたら、
 汎用 shader とは別に専用 shader を作る。
 
 例えば:
 
-    mul_mat_vecq_pq2_signed.comp
+    mul_mat_vecq_pq2_bonsai_ternary.comp
 
 など。
 
-この shader は PQ2_0 専用とする。
+この shader は validated Ternary Bonsai 2 PQ2_0 専用とする。
 
 他の量子化形式との共用コードを増やさない。
 
 目的は compiler に以下を明示すること。
 
-    A = PQ2_0 signed q - 1
+    A = validated Bonsai PQ2_0, q in {0, 1, 2}
     B = Q8_1
     dot = signed int8 DP4A
     K = 128
@@ -660,8 +662,8 @@ Xe1/Xe2 variant では、
 runtime pipeline selection の組合せとする。必要なら次のように source を
 分けてもよい。
 
-    pq2_ternary_xe1.comp
-    pq2_ternary_xe2.comp
+    mul_mat_vecq_pq2_bonsai_ternary_xe1.comp
+    mul_mat_vecq_pq2_bonsai_ternary_xe2.comp
 
 の2種類。
 
@@ -780,12 +782,13 @@ GLSL だけ変更して終わりにしない。
 
 Vulkan backend の shader registration / pipeline creation を調査し、
 
-    GGML_TYPE_PQ2_0 + Q8_1
+    GGML_TYPE_PQ2_0 + Q8_1 + Bonsai-ternary opt-in
 
-の場合に専用 shader が選択されるようにする。GGML tensor type には
-"Bonsai 2 ternary" と "q=3 を含む一般 PQ2_0" を区別する metadata はない。
-よって q=3 の不在を selection 条件にせず、通常の PQ2_0 にも正しい
-signed decoder を使う。selection は Q8_1 path、integer-dot capability、
+の場合にだけ専用 shader が選択されるようにする。GGML tensor type には
+"Bonsai 2 ternary" と "q=3 を含む一般 PQ2_0" を区別する metadata がない。
+したがって generic PQ2_0 dispatch を置換してはならない。explicit backend
+option、Bonsai-only executable、または model-load 時の validation result を
+host-side opt-in として渡す。selection はさらに integer-dot capability、
 subgroup-size-control capability、および作成できた pipeline に基づける。
 
 ---
@@ -822,7 +825,7 @@ A:
 
 B:
 
-    new PQ2_0 signed shader
+    new PQ2_0 Bonsai ternary shader
 
 C:
 
@@ -842,9 +845,9 @@ floating point tolerance に合わせる。
     q = 0
     q = 1
     q = 2
-    q = 3
 
-すべてを人工的に生成する。
+を人工的に生成する。さらに model-load 時または offline validation 時に、
+対象の全 PQ2_0 tensor が q=3 を含まないことを確認する。
 
 ---
 
@@ -862,24 +865,21 @@ floating point tolerance に合わせる。
 全 q=2
 
 4.
-全 q=3
-
-5.
 0,1,2 の周期パターン
 
-6.
+5.
 ランダム q
 
-7.
+6.
 128要素境界
 
-8.
+7.
 複数 PQ2 block
 
-9.
+8.
 K が128の倍数である複数の legal case (128, 256, 384, ...)
 
-10.
+9.
 matrix row/column が複数の場合
 
 PQ2_0 tensor の row width は128の倍数でなければならない。K が128の倍数で
@@ -896,25 +896,17 @@ dispatch boundary の一般的な挙動を確認する場合は、PQ2_0 tensor �
     00
     01
     02
-    03
-    00 01 02 03
-    03 02 01 00
+    00 01 02
+    02 01 00
 
-期待値:
+期待値は、各 byte を signed int8 として
 
-    FF
-    00
-    01
-    02
+    00 -> FF (-1)
+    01 -> 00 ( 0)
+    02 -> 01 (+1)
 
-signed int8 として、
-
-    -1
-     0
-    +1
-    +2
-
-となることを確認する。
+となること、および複数 byte の decode で隣の byte に borrow が伝播しない
+ことである。`00 01 02` は `FF 00 01`、`02 01 00` は `01 00 FF` を期待する。
 
 ---
 
@@ -929,7 +921,7 @@ existing generic PQ2_0 Q8_1 integer-dot shader
 generic PQ2_0 signed-decoder shader
 
 3.
-PQ2_0 signed dedicated shader
+PQ2_0 Bonsai ternary dedicated shader
 
 4.
 Xe1 variant
@@ -968,7 +960,7 @@ LLM 全体だけではなく、128-element PQ2 dot product の micro benchmark �
 について、
 
     existing generic integer-dot
-    signed dedicated
+    Bonsai ternary dedicated
 
 を比較する。
 
@@ -1060,7 +1052,7 @@ Phase 1:
 
     existing integer-dot shader
     +
-    branchless signed PQ2 decoder
+    branchless Bonsai ternary decoder
     +
     signed scale formula
 
@@ -1069,7 +1061,7 @@ correctness
 
 Phase 2:
 
-    dedicated PQ2 signed shader
+    dedicated PQ2 Bonsai ternary shader
 
 目的:
 generic overhead 削減
@@ -1177,7 +1169,8 @@ subgroup size をログに出す。
 以下を行わない。
 
 - PQ2_0 の memory layout を変更する
-- q=3 を勝手に q=1 にする
+- validated Bonsai-only shader を generic PQ2_0 dispatch に使用する
+- q=3 を q=0, q=1, または q=2 として扱う
 - signed/unsigned dot product を混同する
 - unsigned-q path の ds.y correction を削除する
 - signed (q - 1) path に ds.y correction を追加する
@@ -1200,8 +1193,8 @@ ggml/src/ggml-vulkan/
     mul_mat_vecq.comp
     mul_mat_vecq_funcs.glsl
 
-    mul_mat_vecq_pq2_signed.comp
-    mul_mat_vecq_pq2_signed.glsl
+    mul_mat_vecq_pq2_bonsai_ternary.comp
+    mul_mat_vecq_pq2_bonsai_ternary.glsl
 
 など。
 
