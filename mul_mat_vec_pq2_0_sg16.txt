@@ -1,0 +1,125 @@
+#version 450
+
+// mul_mat_vec for validated Ternary Bonsai 2 PQ2_0 weights (q in {0,1,2}, q=3 never occurs).
+// B is f32/f16 (B_TYPEV4 required). Target: Intel Xe1/Xe2 with required subgroup size 16.
+//
+// One workgroup = one subgroup = 16 lanes. Pipeline must use required subgroup size 16.
+// Each lane handles 8 weights per 128-weight block:
+//   bytes qs[lane]    -> weights 4*lane      .. 4*lane+3      (B vec4 #lane)
+//   bytes qs[lane+16] -> weights 64+4*lane   .. 64+4*lane+3   (B vec4 #lane+16)
+// so B loads of each vec4 are fully contiguous across the subgroup.
+//
+// Decode: f = float(x & (3 << 2k)) = q * 4^k, B is pre-scaled by 4^-k (exact power of 2).
+//   sum(w*b) = da * (sum(b' * f) - sum(b)),  w = q - 1
+// The pre-scale and sum(b) are shared by all NUM_ROWS rows.
+
+#extension GL_EXT_shader_explicit_arithmetic_types_int32 : require
+
+#if !defined(DATA_A_PQ2_0)
+#error This shader only supports PQ2_0
+#endif
+#if !defined(USE_SUBGROUP_ADD_NO_SHMEM)
+#error This shader requires USE_SUBGROUP_ADD_NO_SHMEM (one workgroup = one subgroup)
+#endif
+#if !defined(B_TYPEV4)
+#error This shader requires B_TYPEV4
+#endif
+
+#include "mul_mat_vec_base.glsl"
+
+#define PQ2_LANES 16u
+
+layout(local_size_x = 16, local_size_y = 1, local_size_z = 1) in;
+
+#ifndef PQ2_UNROLL
+#define PQ2_UNROLL 4u
+#endif
+
+const vec4 PQ2_B_SCALE = vec4(1.0, 0.25, 0.0625, 0.015625);
+
+uint a_offset, b_offset, d_offset;
+uint col4[NUM_COLS];
+
+vec4 pq2_expand(const uint x) {
+    return vec4(float(x & 0x03u), float(x & 0x0Cu), float(x & 0x30u), float(x & 0xC0u));
+}
+
+// Process `count` consecutive 128-weight blocks starting at blk0.
+void pq2_step(inout FLOAT_TYPE temp[NUM_COLS][NUM_ROWS], const uint first_row, const uint num_rows,
+              const uint nb, const uint blk0, const uint lane, const uint count) {
+    float da[PQ2_UNROLL][NUM_ROWS];
+    uint qa0[PQ2_UNROLL][NUM_ROWS];
+    uint qa1[PQ2_UNROLL][NUM_ROWS];
+
+    // issue all A loads first
+    [[unroll]] for (uint u = 0; u < count; ++u) {
+        [[unroll]] for (uint n = 0; n < num_rows; ++n) {
+            const uint ib = (first_row + n) * nb + blk0 + u + a_offset;
+            da[u][n]  = float(data_a[ib].d);
+            qa0[u][n] = uint(data_a[ib].qs[lane]);
+            qa1[u][n] = uint(data_a[ib].qs[lane + PQ2_LANES]);
+        }
+    }
+
+    [[unroll]] for (uint u = 0; u < count; ++u) {
+        [[unroll]] for (uint j = 0; j < NUM_COLS; ++j) {
+            const uint bi = col4[j] + (blk0 + u) * 32u + lane;
+            vec4 b0 = vec4(data_b_v4[bi]);
+            vec4 b1 = vec4(data_b_v4[bi + PQ2_LANES]);
+
+            const float sb = ((b0.x + b0.y) + (b0.z + b0.w)) + ((b1.x + b1.y) + (b1.z + b1.w));
+            b0 *= PQ2_B_SCALE;
+            b1 *= PQ2_B_SCALE;
+
+            [[unroll]] for (uint n = 0; n < num_rows; ++n) {
+                const float dq = dot(b0, pq2_expand(qa0[u][n])) + dot(b1, pq2_expand(qa1[u][n]));
+                temp[j][n] = FLOAT_TYPE(fma(da[u][n], dq - sb, float(temp[j][n])));
+            }
+        }
+    }
+}
+
+void compute_outputs(const uint32_t first_row, const uint32_t num_rows) {
+    const uint lane = gl_LocalInvocationID.x;
+
+    get_offsets(a_offset, b_offset, d_offset);
+
+    [[unroll]] for (uint j = 0; j < NUM_COLS; ++j) {
+        col4[j] = (j * p.batch_stride_b + b_offset) / 4u;
+    }
+
+    FLOAT_TYPE temp[NUM_COLS][NUM_ROWS];
+
+    [[unroll]] for (uint j = 0; j < NUM_COLS; ++j) {
+        [[unroll]] for (uint n = 0; n < NUM_ROWS; ++n) {
+            temp[j][n] = FLOAT_TYPE(0);
+        }
+    }
+
+    // ncols is a multiple of 128 for PQ2_0
+    const uint nb = p.ncols / QUANT_K;
+
+    uint blk = 0;
+    for (; blk + PQ2_UNROLL <= nb; blk += PQ2_UNROLL) {
+        pq2_step(temp, first_row, num_rows, nb, blk, lane, PQ2_UNROLL);
+    }
+    for (; blk < nb; ++blk) {
+        pq2_step(temp, first_row, num_rows, nb, blk, lane, 1u);
+    }
+
+    reduce_result(temp, d_offset, first_row, num_rows, lane);
+}
+
+void main() {
+    const uint first_row = NUM_ROWS * (gl_WorkGroupID.x + gl_NumWorkGroups.x * gl_WorkGroupID.z);
+
+    // do NUM_ROWS at a time, unless there aren't enough remaining rows
+    if (first_row + NUM_ROWS <= p.stride_d) {
+        compute_outputs(first_row, NUM_ROWS);
+    } else {
+        if (first_row >= p.stride_d) {
+            return;
+        }
+        compute_outputs(first_row, min(NUM_ROWS, p.stride_d - first_row));
+    }
+}
